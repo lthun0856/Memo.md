@@ -1,0 +1,289 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --paper: #F5F3EC;
+  --ink: #211F1A;
+  --ink-soft: #6B6551;
+  --line: #D8D2BC;
+  --accent: #B8863F;
+  --dark: #2B2820;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  overflow: hidden;
+  user-select: none;
+}
+
+.wrap {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pages {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.page {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 46px 34px 10px;
+}
+.page.active { display: flex; }
+
+.page h1 {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 22px 0 10px;
+}
+.page p {
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  max-width: 340px;
+}
+.page p b { color: var(--ink); }
+
+/* 놓치기 쉬운 핵심 안내(예: 주제를 먼저 만들어야 함)를 눈에 띄게 강조하는 문구 상자 */
+.welcome-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(184, 134, 63, 0.12);
+  border: 1px solid rgba(184, 134, 63, 0.35);
+  border-radius: 8px;
+  color: var(--ink) !important;
+}
+
+/* ---- 공용 목업 박스 ---- */
+.mock {
+  width: 320px;
+  border-radius: 10px;
+  background: #FFFFFF;
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(30,25,10,0.10);
+  overflow: hidden;
+}
+
+/* 1: 인사말 */
+.mock-intro {
+  width: auto;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+}
+.app-badge {
+  width: 84px;
+  height: 84px;
+  border-radius: 20px;
+  background: #4A4A4A;
+  color: #fff;
+  font-size: 40px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+}
+
+/* 2: 위젯 목업 */
+.mock-widget-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  background: linear-gradient(135deg, #2B2820, #3A3527);
+}
+.mock-dot { width: 8px; height: 8px; border-radius: 50%; background: #D9D3BE; opacity: 0.55; }
+.mock-widget-title { flex: 1; text-align: left; font-size: 11px; font-weight: 700; color: #F3EFE1; letter-spacing: 0.04em; }
+.mock-pin { display: inline-flex; color: #D9D3BE; }
+.mock-widget-body { padding: 12px; background: #F7F4EC; }
+.mock-topic-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.mock-topic {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 700;
+}
+.mock-list-item {
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--ink);
+  background: #FFFFFF;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-bottom: 6px;
+}
+
+/* 3: 메모 서식 목업 */
+.mock-memo-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #FBFAF5;
+}
+.mock-chip {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+  background: rgba(0,0,0,0.05);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.mock-memo-title { font-size: 12px; font-weight: 700; color: var(--ink); }
+.mock-toolbar { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: #FBFAF5; }
+.mock-tbtn {
+  width: 24px; height: 24px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--ink);
+  background: rgba(0,0,0,0.04);
+}
+.mock-lines { padding: 14px 12px 6px; background: #FBFAF5; display: flex; flex-direction: column; gap: 8px; }
+.mock-lines span { display: block; height: 8px; border-radius: 4px; background: rgba(0,0,0,0.08); }
+.mock-lines span.short { width: 55%; }
+
+.mock-checklist {
+  padding: 6px 12px 16px;
+  background: #FBFAF5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mock-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink);
+}
+.mock-checklist input[type="checkbox"] { accent-color: var(--accent); }
+.mock-checklist s { color: var(--ink-soft); }
+
+/* 4: MD내보내기 목업 */
+.mock-export {
+  padding: 22px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.mock-file-icon { font-size: 30px; }
+.mock-filename {
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: #F2EEDF;
+  border-radius: 5px;
+  padding: 6px 10px;
+  word-break: break-all;
+}
+.mock-export-btn {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--dark);
+  border-radius: 6px;
+  padding: 8px 16px;
+}
+
+/* 5: 마무리 목업 */
+.mock-finish {
+  width: auto;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+.mock-finish-icon {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: #F2EEDF;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+}
+
+/* 5: MD 기능 사용 여부 선택 */
+.welcome-choice {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+}
+.choice-btn {
+  border: none;
+  background: var(--dark);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.choice-btn:hover { opacity: 0.88; }
+.choice-btn.ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.choice-btn.ghost:hover { background: rgba(0,0,0,0.05); }
+.choice-btn.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- 하단 네비게이션 ---- */
+.footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px 20px;
+}
+
+.dots { display: flex; gap: 6px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); transition: background 0.15s, width 0.15s; }
+.dot.active { background: var(--accent); width: 16px; border-radius: 3px; }
+
+.nav-btns { display: flex; gap: 8px; }
+.nav-btn {
+  border: none;
+  background: var(--dark);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.nav-btn:hover { opacity: 0.88; }
+.nav-btn:disabled {
+  background: var(--line);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.nav-btn:disabled:hover { opacity: 1; }
+.nav-btn.ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.nav-btn.ghost:hover { background: rgba(0,0,0,0.05); }
+.nav-btn.ghost:disabled { visibility: hidden; }

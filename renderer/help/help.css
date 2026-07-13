@@ -1,0 +1,134 @@
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif;
+  background: #F5F3EC;
+  color: #211F1A;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.22) transparent;
+}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.34); }
+
+.wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 22px 26px 40px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.lead {
+  font-size: 13px;
+  color: #4A4739;
+  margin: 0 0 16px;
+}
+
+/* 상단 목차 칩 네비게이션 */
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px;
+  margin: 0 0 22px;
+  background: #EFEBDD;
+  border: 1px solid #D8D2BC;
+  border-radius: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.toc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #4A4739;
+  text-decoration: none;
+  background: #FBFAF5;
+  border: 1px solid #D8D2BC;
+  border-radius: 999px;
+  padding: 5px 10px 5px 8px;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.toc-chip:hover {
+  background: #2B2820;
+  color: #FBFAF5;
+  border-color: #2B2820;
+}
+.toc-ico { font-size: 12px; }
+
+.doc-section {
+  background: #FBFAF5;
+  border: 1px solid #E2DDC9;
+  border-radius: 10px;
+  padding: 4px 16px 12px;
+  margin-bottom: 14px;
+  scroll-margin-top: 56px;
+}
+
+h2 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #D8D2BC;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sec-ico { font-size: 14px; }
+
+h3 {
+  font-size: 12.5px;
+  color: #4A4739;
+  margin: 14px 0 6px;
+}
+
+p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 6px 0;
+}
+
+ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+li {
+  font-size: 12.5px;
+  line-height: 1.7;
+  margin-bottom: 4px;
+}
+
+b { color: #111111; }
+
+code {
+  background: #EDE9DA;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.hint {
+  font-size: 11.5px;
+  color: #6B6551;
+  background: #EFEBDD;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+
+.footer-note {
+  margin-top: 30px;
+  font-size: 11.5px;
+  color: #6B6551;
+  text-align: center;
+}

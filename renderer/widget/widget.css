@@ -1,0 +1,343 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --paper: #F7F4EC;
+  --paper-soft: #FFFFFF;
+  --ink: #221F17;
+  --ink-soft: #6B6551;
+  --line: #E6E0CC;
+  --accent: #B8863F;
+}
+
+html, body { height: 100%; font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif; background: transparent; }
+
+.widget {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--paper);
+  overflow: hidden;
+  box-shadow: 0 3px 8px rgba(30, 25, 10, 0.14);
+  /* 타이틀바를 더블클릭할 때 글자/아이콘이 파랗게 드래그 선택되는 것처럼 보이던
+     현상 방지(위젯엔 따로 선택해서 복사할 텍스트가 없어서 통째로 꺼도 안전함) */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.titlebar {
+  /* (수정) 타이틀바 전체를 이동 영역으로 두면 OS가 더블클릭을 "창 이동"으로 가로채서
+     접기/펼치기가 안 먹는 문제가 있었음(펼친 상태도 동일). 그래서 타이틀바 자체는
+     no-drag로 두고, 이동은 옆의 ⠿ 손잡이(.drag-handle)만 전담하도록 분리함 */
+  -webkit-app-region: no-drag;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  background: linear-gradient(135deg, #2B2820, #3A3527);
+  border-bottom: 1px solid rgba(0,0,0,0.2);
+  flex-shrink: 0;
+}
+.title { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; color: #F3EFE1; letter-spacing: 0.05em; white-space: nowrap; }
+
+.drag-handle {
+  /* (수정) 펼친 상태에서도 항상 보이게 해서, 위젯 이동은 이 손잡이로만 하도록 함 */
+  -webkit-app-region: drag;
+  display: block;
+  flex-shrink: 0;
+  color: rgba(255,255,255,0.55);
+  font-size: 15px;
+  padding: 0 4px;
+  cursor: move;
+}
+
+.titlebar-actions { -webkit-app-region: no-drag; display: flex; gap: 2px; align-items: center; }
+.always-actions { -webkit-app-region: no-drag; display: flex; gap: 2px; align-items: center; }
+.icon-btn {
+  border: none; background: transparent; color: #D9D3BE;
+  font-size: 14px; cursor: pointer; padding: 3px 7px; border-radius: 5px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.icon-btn.active { background: rgba(255,255,255,0.18); color: #fff; }
+.icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.icon-btn:disabled:hover { background: transparent; color: #D9D3BE; }
+
+.collapse-btn { -webkit-app-region: no-drag; transition: transform 0.15s ease; }
+
+.collapsed-icons {
+  /* (재수정) 이 영역을 드래그 가능하게 두면, Windows에서는 더블클릭을 "창 이동" 제스처로
+     먼저 가로채버려서 더블클릭(펼치기) 이벤트가 아예 JS에 전달되지 않는 문제가 있었음
+     (마우스를 눌러서 감지하는 방식으로 바꿔도 마찬가지였음 - OS 차원의 문제라 JS로는
+     못 고침). 그래서 이 영역은 다시 no-drag로 되돌려서 더블클릭이 확실히 동작하게 하고,
+     대신 접힘 상태에서 위젯을 옮길 땐 옆의 ⠿ 손잡이를 잡고 드래그하도록 함 */
+  -webkit-app-region: no-drag;
+  display: none;
+  flex: 1;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 6px;
+  align-items: center;
+}
+.collapsed-icons .topic-icon-btn {
+  width: 26px; height: 26px; font-size: 11px; flex-shrink: 0;
+}
+.collapsed-icons .topic-icon-btn.two-char { font-size: 9px; }
+
+/* ---- 접힘 모드: 타이틀바만 남기고 주제 버튼만 표시 ---- */
+.widget.collapsed { height: 44px; }
+.widget.collapsed .title,
+.widget.collapsed .icon-row,
+.widget.collapsed .dashboard {
+  display: none;
+}
+.widget.collapsed .collapsed-icons { display: flex; }
+.widget.collapsed .collapse-btn { transform: rotate(-90deg); }
+
+/* ---- 최초 설치 직후 웰컴창이 열려있는 동안: 위젯을 그대로 보여주되 클릭은 전부 막음 ---- */
+.widget.welcome-locked { pointer-events: none; }
+
+.icon-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-soft);
+}
+
+.topic-icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.topic-icon-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 10px rgba(0,0,0,0.22); }
+.topic-icon-btn:active { transform: translateY(0); }
+.topic-icon-btn.two-char { font-size: 10.5px; letter-spacing: -0.3px; }
+
+.empty-hint {
+  font-size: 11px;
+  color: var(--ink-soft);
+  padding: 4px;
+}
+
+.dashboard {
+  /* (수정) 예전엔 flex:1(=남는 공간을 꽉 채우기)이었는데, 이러면 위젯 창이 실제 필요한
+     크기보다 커져 있을 때 dashboard가 그 남는 공간까지 억지로 채워버리고, 그 채워진
+     크기를 syncHeight()가 다시 재서 "이미 이 크기가 맞다"고 착각 → 창이 안 줄어들고
+     하단에 빈 공간이 계속 남던 버그의 원인이었음. flex:1을 빼서(기본값 0 1 auto)
+     내용 크기만큼만 차지하게 하면, 남는 공간이 안 생기고 syncHeight()가 정확한
+     크기를 재서 창을 딱 맞게 줄일 수 있음(화면 높이 초과시엔 자동으로 줄어들며 스크롤 가능) */
+  overflow-y: visible;
+  padding: 8px 8px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.2) transparent;
+}
+.dashboard.scrollable { overflow-y: auto; }
+.dashboard::-webkit-scrollbar { width: 6px; }
+.dashboard::-webkit-scrollbar-track { background: transparent; }
+.dashboard::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
+.dashboard::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.32); }
+.dashboard::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+
+.topic-row {
+  padding: 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  margin-bottom: 5px;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+  transition: box-shadow 0.12s ease, opacity 0.12s ease;
+}
+.topic-row:hover { box-shadow: 0 3px 8px rgba(0,0,0,0.08); }
+.topic-row.dragging { opacity: 0.4; }
+.topic-row.drag-over { box-shadow: 0 0 0 2px var(--accent) inset; }
+
+.topic-row-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.drag-grip {
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1;
+}
+.topic-row.dragging .drag-grip { cursor: grabbing; }
+
+.topic-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.05);
+}
+
+.topic-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  flex: 1;
+}
+
+.topic-count {
+  font-size: 10.5px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+}
+
+.topic-desc {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 3px;
+  padding-left: 16px;
+}
+
+.memo-list {
+  margin-top: 6px;
+  padding-left: 16px;
+  display: none;
+}
+.memo-list.open { display: block; }
+
+.memo-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.memo-list-item:hover { color: var(--ink); }
+.memo-list-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.memo-list-item-del {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+.memo-list-item-del:hover { opacity: 1; background: rgba(200,40,30,0.12); color: #C8281E; }
+
+/* 위젯 titlebar의 눈모양(전체 숨기기) 버튼 옆에 붙는 좁고 긴 세로 바 형태 토글.
+   숨겨진(위젯에서 숨김) 주제가 하나라도 있을 때만 나타나고, 누르면 대시보드에 숨긴 주제가
+   드러남(showHidden). 평소엔 위젯 바탕색(--paper)보다 살짝 진한 톤으로 은은하게, 지금
+   숨긴 주제를 보여주는 중(active)일 땐 포인트색(--accent)으로 눈에 띄게 표시함 */
+.hidden-toggle {
+  -webkit-app-region: no-drag;
+  border: none;
+  width: 5px;
+  height: 18px;
+  padding: 0;
+  border-radius: 3px;
+  background: #E3DCC4;
+  opacity: 0.85;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.hidden-toggle:hover { opacity: 1; }
+.hidden-toggle.active { background: var(--accent); opacity: 1; }
+
+.topic-vis-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+.topic-vis-btn:hover { opacity: 1; background: rgba(0,0,0,0.06); }
+.topic-vis-btn.active { opacity: 1; }
+
+/* 클릭 안 되는 순수 표시용 눈 아이콘(주제 단위): 뜬눈/감은눈 둘 다 또렷하게, 색으로 구분(뜬눈=진한 잉크색, 감은눈=포인트색) */
+.topic-hidden-indicator {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  flex-shrink: 0;
+  opacity: 0.85;
+  cursor: default;
+}
+.topic-hidden-indicator.is-hidden { opacity: 1; color: var(--accent); }
+
+/* 클릭 안 되는 순수 표시용 눈 아이콘(메모 단위): 목록에서 그 메모가 지금 화면에 보이는지만 표시 */
+.memo-hidden-indicator {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.6;
+  cursor: default;
+}
+.memo-hidden-indicator.is-hidden { opacity: 0.3; }
+
+.unhide-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 9.5px;
+  border-radius: 8px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.unhide-btn:hover { color: var(--ink); }
+
+/* ---- 삭제 확인 모달 (네이티브 confirm()이 닫힌 뒤 위젯이 클릭/입력을 못 받는 문제를
+   피하려고 자체 구현 — 설정창/메모창의 같은 모달과 동일한 패턴) ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  -webkit-app-region: no-drag;
+}
+.modal-overlay[hidden] { display: none; }
+.modal-box {
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 16px;
+  width: min(220px, calc(100vw - 24px));
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+.modal-title { font-size: 12.5px; color: var(--ink); font-weight: 600; margin: 0 0 8px; }
+.modal-hint { font-size: 11px; color: var(--ink-soft); margin: 0 0 14px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.modal-btn { border: none; border-radius: 5px; font-size: 12px; padding: 6px 12px; cursor: pointer; }
+.modal-btn-cancel { background: rgba(0,0,0,0.06); color: var(--ink-soft); }
+.modal-btn-cancel:hover { background: rgba(0,0,0,0.1); }
+.modal-btn-confirm { background: var(--ink); color: #fff; }
+.modal-btn-confirm:hover { opacity: 0.85; }

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title></title>
+  <link rel="stylesheet" href="welcome.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="pages" id="pages">
+
+      <!-- 1: 인사말 -->
+      <section class="page" data-page="0">
+        <div class="mock mock-intro">
+          <div class="app-badge">M</div>
+        </div>
+        <h1 id="p0Title"></h1>
+        <p id="p0Desc"></p>
+      </section>
+
+      <!-- 2: 위젯 -->
+      <section class="page" data-page="1">
+        <div class="mock mock-widget">
+          <div class="mock-widget-bar">
+            <span class="mock-dot"></span>
+            <span class="mock-widget-title" id="p1MockWidgetTitle"></span>
+            <span class="mock-pin"><svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="7" r="4" fill="currentColor" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="11" x2="12" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+          </div>
+          <div class="mock-widget-body">
+            <div class="mock-topic-row">
+              <span class="mock-topic" style="background:#B8863F;" id="p1MockTopic1"></span>
+              <span class="mock-topic" style="background:#6B8F71;" id="p1MockTopic2"></span>
+              <span class="mock-topic" style="background:#8A6FA8;" id="p1MockTopic3"></span>
+            </div>
+            <div class="mock-list-item" id="p1MockList1"></div>
+            <div class="mock-list-item" id="p1MockList2"></div>
+          </div>
+        </div>
+        <h1 id="p1Title"></h1>
+        <p id="p1Desc"></p>
+        <p class="welcome-note" id="p1Note"></p>
+      </section>
+
+      <!-- 3: 메모 서식 -->
+      <section class="page" data-page="2">
+        <div class="mock mock-memo">
+          <div class="mock-memo-bar">
+            <span class="mock-chip" id="p2MockChip"></span>
+            <span class="mock-memo-title" id="p2MockMemoTitle"></span>
+          </div>
+          <div class="mock-toolbar">
+            <span class="mock-tbtn"><b>B</b></span>
+            <span class="mock-tbtn"><i>I</i></span>
+            <span class="mock-tbtn">🔗</span>
+            <span class="mock-tbtn">☑</span>
+            <span class="mock-tbtn">🖼</span>
+          </div>
+          <div class="mock-lines">
+            <span></span><span class="short"></span>
+          </div>
+          <div class="mock-checklist">
+            <label><input type="checkbox" checked disabled /><s id="p2Check1"></s></label>
+            <label><input type="checkbox" disabled /><span id="p2Check2"></span></label>
+          </div>
+        </div>
+        <h1 id="p2Title"></h1>
+        <p id="p2Desc"></p>
+      </section>
+
+      <!-- 4: MD내보내기 -->
+      <section class="page" data-page="3">
+        <div class="mock mock-export">
+          <div class="mock-file-icon">📤</div>
+          <div class="mock-filename" id="p3MockFilename"></div>
+          <div class="mock-export-btn" id="p3MockExportBtn"></div>
+        </div>
+        <h1 id="p3Title"></h1>
+        <p id="p3Desc"></p>
+      </section>
+
+      <!-- 5: MD 기능 사용 여부 -->
+      <section class="page" data-page="4">
+        <div class="mock mock-export">
+          <div class="mock-file-icon">📝</div>
+        </div>
+        <h1 id="p4Title"></h1>
+        <p id="p4Desc"></p>
+        <div class="welcome-choice">
+          <button type="button" id="btnMdOn" class="choice-btn"></button>
+          <button type="button" id="btnMdOff" class="choice-btn ghost"></button>
+        </div>
+      </section>
+
+      <!-- 6: 마무리 -->
+      <section class="page" data-page="5">
+        <div class="mock mock-finish">
+          <div class="mock-finish-icon">🎉</div>
+        </div>
+        <h1 id="p5Title"></h1>
+        <p id="p5Desc"></p>
+      </section>
+
+    </div>
+
+    <div class="footer">
+      <div class="dots" id="dots"></div>
+      <div class="nav-btns">
+        <button type="button" id="btnPrev" class="nav-btn ghost"></button>
+        <button type="button" id="btnNext" class="nav-btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../lang/ko.js"></script>
+  <script src="welcome.js"></script>
+</body>
+</html>

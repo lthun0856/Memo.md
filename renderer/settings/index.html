@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title></title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="tabs" id="tabs">
+      <button type="button" class="tab-btn" data-tab="topics" id="tabBtnTopics"></button>
+      <button type="button" class="tab-btn" data-tab="general" id="tabBtnGeneral"></button>
+      <button type="button" class="tab-btn" data-tab="widget" id="tabBtnWidget"></button>
+      <button type="button" class="tab-btn" data-tab="md" id="tabBtnMd"></button>
+      <button type="button" class="tab-btn" data-tab="edit" id="tabBtnEdit"></button>
+      <button type="button" class="tab-btn" data-tab="trash" id="tabBtnTrash"></button>
+      <button type="button" class="tab-btn" data-tab="help" id="tabBtnHelp"></button>
+    </div>
+
+    <div class="tab-panel" data-panel="topics">
+      <section>
+        <h2 id="topicsHeading"></h2>
+        <p class="hint" id="topicMainHint"></p>
+        <p class="hint md-feature-only" id="topicMdTipHint"></p>
+        <div class="field md-feature-only" id="categorySection">
+          <span class="field-label" id="categoryFieldLabel"></span>
+          <div id="categoryList" class="category-list"></div>
+          <div class="topic-form-row">
+            <div class="field field-grow">
+              <input type="text" id="newCategoryName" />
+            </div>
+            <button id="btnAddCategory" type="button"></button>
+          </div>
+          <p class="hint hint-error" id="categoryNameError" hidden></p>
+        </div>
+
+        <p class="hint" id="topicEditNameHint"></p>
+        <div id="topicList" class="topic-list"></div>
+
+        <div class="topic-form">
+          <div class="topic-form-row">
+            <div class="field md-feature-only" id="newTopicParentField">
+              <span class="field-label" id="newTopicParentLabel"></span>
+              <select id="newTopicParent"></select>
+            </div>
+            <div class="field field-grow">
+              <span class="field-label" id="newTopicNameLabel"></span>
+              <input type="text" id="newTopicName" />
+            </div>
+          </div>
+          <div class="topic-form-row">
+            <div class="field field-grow">
+              <span class="field-label" id="newTopicDescLabel"></span>
+              <input type="text" id="newTopicDesc" />
+            </div>
+            <div class="field field-grow">
+              <span class="field-label" id="newTopicDefaultTitleLabel"></span>
+              <input type="text" id="newTopicDefaultTitle" />
+            </div>
+          </div>
+          <div class="topic-form-row topic-form-row-appearance">
+            <div class="field">
+              <span class="field-label" id="newTopicCharLabel"></span>
+              <input type="text" id="newTopicChar" maxlength="2" class="char-input" />
+            </div>
+            <div class="field-color-group">
+              <label class="mini-label"><span id="newTopicColorLabel"></span> <input type="color" id="newTopicColor" value="#8A8574" /></label>
+              <label class="mini-label"><span id="newTopicTextColorLabel"></span> <input type="color" id="newTopicTextColor" value="#FFFFFF" /></label>
+              <label class="mini-label"><span id="newTopicMemoColorLabel"></span> <input type="color" id="newTopicMemoColor" value="#8A8574" /></label>
+            </div>
+          </div>
+          <p class="hint hint-error" id="topicNameError" hidden></p>
+          <div class="topic-form-row topic-form-row-submit">
+            <button id="btnAddTopic"></button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-panel="general">
+      <section>
+        <h2 id="generalHeading"></h2>
+        <label class="check-row"><input type="checkbox" id="autoLaunch" /> <span id="autoLaunchLabel"></span></label>
+        <label class="check-row"><input type="checkbox" id="multiMode" /> <span id="multiModeLabel"></span></label>
+        <label class="check-row"><input type="checkbox" id="confirmMemoDelete" /> <span id="confirmMemoDeleteLabel"></span></label>
+      </section>
+
+      <section>
+        <h2 id="shortcutHeading"></h2>
+        <p class="hint" id="shortcutHint"></p>
+        <div class="row">
+          <input type="text" id="newMemoShortcutInput" readonly style="flex:1;" />
+          <button id="btnClearShortcut" type="button"></button>
+        </div>
+      </section>
+
+      <section>
+        <h2 id="opacityHeading"></h2>
+        <p class="hint" id="opacityHint"></p>
+        <div class="row">
+          <input type="range" id="opacityRange" min="10" max="100" step="5" style="flex:1;" />
+          <span id="opacityValue" style="width:40px;text-align:right;">100%</span>
+        </div>
+      </section>
+
+      <section>
+        <h2 id="backupHeading"></h2>
+        <p class="hint" id="backupHint1"></p>
+        <div class="row">
+          <button id="btnExportAll" type="button"></button>
+          <span id="exportAllStatus" class="hint"></span>
+        </div>
+        <p class="hint" id="backupHint2"></p>
+        <div class="row">
+          <button id="btnRestoreBackup" type="button" style="background:#6B6551;"></button>
+          <span id="restoreStatus" class="hint"></span>
+        </div>
+        <p class="hint" id="backupHint3"></p>
+      </section>
+
+      <section>
+        <h2 id="storageHeading"></h2>
+        <p class="hint" id="storageHint"></p>
+        <div class="row">
+          <button id="btnSweepAttachments" type="button"></button>
+          <span id="sweepStatus" class="hint"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2 id="autoBackupHeading"></h2>
+        <p class="hint" id="autoBackupHint"></p>
+        <label class="check-row"><input type="checkbox" id="autoBackupEnabled" /> <span id="autoBackupEnabledLabel"></span></label>
+        <div class="row">
+          <input type="text" id="autoBackupFolder" readonly />
+          <button id="btnChooseBackupFolder" type="button"></button>
+        </div>
+        <div class="row">
+          <label><span id="intervalLabel"></span>
+            <select id="autoBackupInterval">
+              <option value="24" id="intervalDaily"></option>
+              <option value="12" id="interval12h"></option>
+              <option value="6" id="interval6h"></option>
+              <option value="0" id="intervalEveryLaunch"></option>
+            </select>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-panel="widget">
+      <section>
+        <h2 id="widgetTabHeading"></h2>
+
+        <p class="subgroup-label" id="widgetColorGroupLabel"></p>
+        <div class="row">
+          <label class="mini-label"><span id="widgetTitlebarColorLabel"></span> <input type="color" id="widgetTitlebarColor" /></label>
+        </div>
+
+        <p class="subgroup-label with-divider" id="widgetSizeGroupLabel"></p>
+        <label class="check-row"><input type="checkbox" id="widgetAutoResize" /> <span id="widgetAutoResizeLabel"></span></label>
+        <div class="row">
+          <label><span id="widgetWidthLabel"></span> <input type="number" id="widgetWidth" min="180" max="600" /></label>
+          <label><span id="widgetHeightLabel"></span> <input type="number" id="widgetHeight" min="200" max="900" /></label>
+        </div>
+
+        <p class="subgroup-label with-divider" id="widgetGestureGroupLabel"></p>
+        <div class="row">
+          <label><span id="widgetSingleClickLabel"></span>
+            <select id="gestureSingle"></select>
+          </label>
+          <label><span id="widgetDoubleClickLabel"></span>
+            <select id="gestureDouble"></select>
+          </label>
+        </div>
+        <p class="hint" id="widgetGestureHint"></p>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-panel="md">
+      <section>
+        <h2 id="mdHeading"></h2>
+        <label class="check-row"><input type="checkbox" id="mdFeatureEnabled" /> <span id="mdFeatureLabel"></span></label>
+        <p class="hint" id="mdFeatureHint"></p>
+      </section>
+
+      <section>
+        <h2 id="vaultHeading"></h2>
+        <div class="row">
+          <input type="text" id="vaultPath" readonly />
+          <button id="btnChooseVault"></button>
+        </div>
+      </section>
+
+      <section>
+        <h2 id="postSaveHeading"></h2>
+        <label class="check-row"><input type="radio" name="postSave" value="keep" id="postSaveKeep" /> <span class="status-dot dot-green"></span> <span id="postSaveKeepLabel"></span></label>
+        <label class="check-row"><input type="radio" name="postSave" value="delete" id="postSaveDelete" /> <span class="status-dot dot-red"></span> <span id="postSaveDeleteLabel"></span></label>
+        <p class="hint" id="postSaveHint"></p>
+      </section>
+
+      <section>
+        <h2 id="exportModeHeading"></h2>
+        <label class="check-row"><input type="checkbox" id="ruleAutoExport" /> <span id="autoExportLabel"></span></label>
+        <p class="hint" id="autoExportHint"></p>
+      </section>
+
+      <section>
+        <h2 id="ruleHeading"></h2>
+        <p class="hint" id="ruleHint1"></p>
+        <p class="hint" id="ruleHint2"></p>
+        <label class="check-row"><input type="checkbox" id="ruleIncludeTopic" /> <span id="includeTopicLabel"></span></label>
+        <label class="check-row"><input type="checkbox" id="ruleIncludeTitle" /> <span id="includeTitleLabel"></span></label>
+        <label class="check-row"><input type="checkbox" id="ruleIncludeDate" /> <span id="includeDateLabel"></span></label>
+        <label class="check-row"><input type="checkbox" id="ruleIncludeSeq" /> <span id="includeSeqLabel"></span></label>
+        <div class="row">
+          <label><span id="separatorLabel"></span>
+            <select id="ruleSeparator">
+              <option value="_" id="separatorUnderscore"></option>
+              <option value="-" id="separatorHyphen"></option>
+              <option value=" " id="separatorSpace"></option>
+            </select>
+          </label>
+        </div>
+        <p class="hint"><span id="exampleLabel"></span> <span id="ruleExample"></span></p>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-panel="edit">
+      <section>
+        <h2 id="editHeading"></h2>
+        <p class="hint" id="editHint"></p>
+        <div class="row">
+          <label><span id="countLabel"></span> <input type="number" id="specialCharCount" min="0" max="20" style="width:60px;" /></label>
+        </div>
+        <div id="specialCharInputs" class="special-char-inputs"></div>
+      </section>
+      <section>
+        <h2 id="refHeading"></h2>
+        <p class="hint" id="refHint"></p>
+        <div class="special-char-reference">
+          <div class="special-char-ref-group">
+            <span class="special-char-ref-label" id="refShapes"></span>
+            <span class="special-char-ref-chars">● ○ ■ □ ▲ △ ▼ ▽ ◆ ◇ ★ ☆</span>
+          </div>
+          <div class="special-char-ref-group">
+            <span class="special-char-ref-label" id="refArrows"></span>
+            <span class="special-char-ref-chars">→ ← ↑ ↓ ↔ ↕ ⇒ ⇐ ⇔</span>
+          </div>
+          <div class="special-char-ref-group">
+            <span class="special-char-ref-label" id="refPunctuation"></span>
+            <span class="special-char-ref-chars">※ ‰ ℃ § ¶ † ‡ • ◎</span>
+          </div>
+          <div class="special-char-ref-group">
+            <span class="special-char-ref-label" id="refBrackets"></span>
+            <span class="special-char-ref-chars">「」『』〈〉《》【】〔〕</span>
+          </div>
+          <div class="special-char-ref-group">
+            <span class="special-char-ref-label" id="refMath"></span>
+            <span class="special-char-ref-chars">± × ÷ ≠ ≤ ≥ ∞ √</span>
+          </div>
+          <div class="special-char-ref-group">
+            <span class="special-char-ref-label" id="refNumbers"></span>
+            <span class="special-char-ref-chars">① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-panel="trash">
+      <section>
+        <h2 id="trashHeading"></h2>
+        <p class="hint" id="trashHint"></p>
+        <div id="trashList" class="trash-list"></div>
+        <div class="trash-actions">
+          <button id="btnEmptyTrash" type="button" class="danger-btn"></button>
+        </div>
+      </section>
+    </div>
+
+    <div class="tab-panel" data-panel="help">
+      <iframe class="help-frame" src="../help/index.html"></iframe>
+    </div>
+
+    <div class="save-bar">
+      <span id="saveStatus"></span>
+      <button id="btnCancel" class="save-btn cancel-btn"></button>
+      <button id="btnApply" class="save-btn apply-btn"></button>
+      <button id="btnSave" class="save-btn"></button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="confirmModal" hidden>
+    <div class="modal-box">
+      <p class="modal-title" id="confirmModalTitle"></p>
+      <p class="modal-hint" id="confirmModalHint"></p>
+      <div class="modal-actions">
+        <button id="confirmModalCancel" class="modal-btn modal-btn-cancel" type="button"></button>
+        <button id="confirmModalConfirm" class="modal-btn modal-btn-confirm" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../lang/ko.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

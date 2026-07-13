@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title></title>
+  <link rel="stylesheet" href="widget.css" />
+</head>
+<body>
+  <div class="widget" id="widget">
+    <div class="titlebar" id="titlebar">
+      <span class="title" id="titleText"></span>
+      <span class="drag-handle" id="dragHandle">⠿</span>
+      <div class="collapsed-icons" id="collapsedIcons"></div>
+      <div class="titlebar-actions" id="titlebarActions">
+        <button id="btnPinWidget" class="icon-btn pin-btn"></button>
+        <button id="btnSettings" class="icon-btn">⚙</button>
+        <button id="btnSearch" class="icon-btn">🔍</button>
+      </div>
+      <div class="always-actions" id="alwaysActions">
+        <button id="btnHideAll" class="icon-btn">👁</button>
+        <button id="btnToggleHidden" class="hidden-toggle" type="button"></button>
+      </div>
+    </div>
+
+    <div class="icon-row" id="iconRow"></div>
+
+    <div class="dashboard" id="dashboard"></div>
+  </div>
+
+  <div class="modal-overlay" id="confirmModal" hidden>
+    <div class="modal-box">
+      <p class="modal-title" id="confirmModalTitle"></p>
+      <p class="modal-hint" id="confirmModalHint"></p>
+      <div class="modal-actions">
+        <button id="confirmModalCancel" class="modal-btn modal-btn-cancel" type="button"></button>
+        <button id="confirmModalConfirm" class="modal-btn modal-btn-confirm" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../lang/ko.js"></script>
+  <script src="widget.js"></script>
+</body>
+</html>

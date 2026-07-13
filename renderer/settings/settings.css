@@ -1,0 +1,305 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif;
+  background: #F5F3EC;
+  color: #111111;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.22) transparent;
+}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.34); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.wrap { padding: 16px 18px 70px; }
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #D8D2BC;
+  padding-bottom: 8px;
+  position: sticky;
+  top: 0;
+  background: #F5F3EC;
+  z-index: 5;
+}
+.tab-btn {
+  background: transparent;
+  color: #4A4739;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tab-btn:hover { background: rgba(0,0,0,0.06); opacity: 1; }
+.tab-btn.active { background: #29271F; color: #fff; }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+h2 {
+  font-size: 13px;
+  color: #111111;
+  margin: 18px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+.tab-panel section:first-of-type h2 { margin-top: 0; }
+
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.row input[type="text"] { flex: 1; }
+.row label { font-size: 12px; color: #111111; display: flex; align-items: center; gap: 6px; }
+
+input[type="text"], input[type="number"], select {
+  padding: 6px 8px;
+  border: 1px solid #D8D2BC;
+  border-radius: 5px;
+  font-size: 12.5px;
+  background: #fff;
+  color: #111111;
+}
+input[type="number"] { width: 70px; }
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  margin-bottom: 6px;
+  color: #111111;
+}
+
+.hint { font-size: 11px; color: #4A4739; margin-top: 2px; }
+.hint-error { color: #B24A3B; }
+
+.subgroup-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #8A6A2F;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+}
+.subgroup-label.with-divider {
+  border-top: 1px solid #D8D2BC;
+  padding-top: 14px;
+  margin-top: 14px;
+}
+
+/* MD내보내기 후 동작: 유지=초록, 전송후삭제=빨강 동그라미로 한눈에 구분 */
+.status-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-green { background: #3C9A5F; }
+.dot-red { background: #C8281E; }
+
+button {
+  border: none;
+  background: #29271F;
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+}
+button:hover { opacity: 0.85; }
+
+.category-list { margin: 4px 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.category-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid #D8D2BC;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 12px;
+}
+.category-item .name { color: #111111; }
+.category-item .del-btn { background: transparent; color: #B24A3B; padding: 1px 5px; font-size: 13px; }
+
+.topic-list { margin-bottom: 10px; }
+.topic-item {
+  padding: 8px 10px;
+  border: 1px solid #D8D2BC;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: #fff;
+}
+.topic-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.topic-item .swatch {
+  width: 22px; height: 22px; border-radius: 5px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; white-space: nowrap;
+}
+.topic-item .name { font-size: 12.5px; font-weight: 700; flex: 1; color: #111111; }
+.topic-item .desc { font-size: 11px; color: #4A4739; flex: 2; }
+.topic-item .del-btn { background: transparent; color: #B24A3B; padding: 2px 6px; font-size: 14px; }
+
+.topic-edit-form {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #D8D2BC;
+}
+.topic-edit-form.open { display: flex; }
+.topic-edit-form .row2 { display: flex; gap: 6px; align-items: center; }
+.topic-edit-form .row2.row2-actions { justify-content: flex-end; }
+.topic-edit-form input[type="text"] { flex: 1; }
+
+.mini-label { font-size: 11px; color: #111111; display: flex; align-items: center; gap: 3px; }
+.mini-label input[type="color"] { width: 24px; height: 24px; padding: 0; border: 1px solid #D8D2BC; border-radius: 4px; }
+
+.topic-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid #D8D2BC;
+  border-radius: 8px;
+  background: #FBFAF6;
+}
+.topic-form-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.topic-form-row-appearance {
+  align-items: flex-end;
+  padding-top: 6px;
+  border-top: 1px dashed #D8D2BC;
+}
+.topic-form-row-submit {
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.field-grow { flex: 1; min-width: 140px; }
+.field-label {
+  font-size: 10.5px;
+  color: #4A4739;
+  font-weight: 600;
+}
+.field input[type="text"] { width: 100%; }
+.field select { width: 100%; }
+.field-color-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.topic-form input[type="text"] { min-width: 0; }
+.char-input { width: 70px !important; text-align: center; }
+
+.trash-list { margin-bottom: 10px; }
+/* (수정) 원래 제목/설명 두 줄이라 한 항목이 46px쯤 됐는데, 목록이 커 보인다는 피드백으로
+   제목과 설명을 한 줄에 나란히 놓고 여백을 줄여 절반 높이로 압축함. 좁으면 말줄임표(...) */
+.trash-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid #D8D2BC;
+  border-radius: 5px;
+  margin-bottom: 4px;
+  background: #fff;
+}
+.trash-item-info { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.trash-item .name {
+  font-size: 11.5px; font-weight: 700; color: #111111;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 0 1 auto; min-width: 40px;
+}
+.trash-item .desc {
+  font-size: 10.5px; color: #4A4739;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 auto; min-width: 0;
+}
+.trash-item .restore-btn { background: #6B6551; padding: 2px 8px; font-size: 11px; flex-shrink: 0; }
+.trash-item .del-btn { background: transparent; color: #B24A3B; padding: 1px 5px; font-size: 13px; flex-shrink: 0; }
+.trash-actions { display: flex; justify-content: flex-end; }
+.danger-btn { background: #B24A3B; }
+.danger-btn:hover { opacity: 0.85; }
+
+/* MD 기능이 꺼졌을 때만 숨기는 항목(예: 상위 주제 드롭다운) */
+body.md-disabled .md-feature-only { display: none; }
+
+.special-char-inputs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.special-char-input { width: 40px !important; text-align: center; }
+
+/* 자주 쓰는 특수문자 참고 목록: 클릭 기능 없이 그냥 보고 직접 선택→복사하는 용도 */
+.special-char-reference { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.special-char-ref-group { display: flex; align-items: baseline; gap: 10px; }
+.special-char-ref-label { flex: 0 0 64px; font-size: 11px; color: #4A4739; }
+.special-char-ref-chars { font-size: 15px; letter-spacing: 3px; user-select: text; cursor: text; }
+
+.help-frame {
+  width: 100%;
+  height: 560px;
+  border: 1px solid #D8D2BC;
+  border-radius: 8px;
+  background: #F5F3EC;
+}
+
+.save-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: #F5F3EC;
+  border-top: 1px solid #D8D2BC;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+#saveStatus { font-size: 11px; color: #4A4739; }
+.save-btn { padding: 8px 18px; }
+.cancel-btn { background: transparent; color: #4A4739; border: 1px solid #D8D2BC; }
+.cancel-btn:hover { background: rgba(0,0,0,0.05); opacity: 1; }
+.apply-btn { background: #6B6551; }
+
+/* ---- 삭제/확인 모달 (네이티브 confirm()이 닫힌 뒤 창이 클릭/입력을 못 받는 문제를 피하려고 자체 구현) ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.modal-overlay[hidden] { display: none; }
+.modal-box {
+  background: #F5F3EC;
+  border-radius: 10px;
+  padding: 18px;
+  width: 280px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+.modal-title { font-size: 13px; color: #111111; font-weight: 600; margin: 0 0 8px; }
+.modal-hint { font-size: 11px; color: #4A4739; margin: 0 0 14px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.modal-btn { border: none; border-radius: 5px; font-size: 12px; padding: 6px 14px; cursor: pointer; }
+.modal-btn-cancel { background: rgba(0,0,0,0.06); color: #4A4739; }
+.modal-btn-cancel:hover { background: rgba(0,0,0,0.1); }
+.modal-btn-confirm { background: #29271F; color: #fff; }
+.modal-btn-confirm:hover { opacity: 0.85; }

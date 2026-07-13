@@ -1,0 +1,35 @@
+{
+  "name": "memo.md",
+  "version": "1.8.3",
+  "description": "바탕화면 메모장 - MD내보내기",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build-win": "electron-builder --win --x64"
+  },
+  "author": "NEMO",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.taehoon.obsidianmemo",
+    "productName": "Memo.md",
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "include": "build/installer.nsh"
+    },
+    "files": [
+      "**/*",
+      "!data/**",
+      "!인계서/**"
+    ]
+  }
+}

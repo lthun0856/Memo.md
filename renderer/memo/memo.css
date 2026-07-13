@@ -1,0 +1,723 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --paper: #FBFAF5;
+  --ink: #211F1A;
+  --ink-soft: rgba(33,31,26,0.64);
+  --line: rgba(0,0,0,0.14);
+  --overlay: rgba(0,0,0,0.05);
+  --overlay-hover: rgba(0,0,0,0.1);
+  --accent: #C9A24B;
+}
+
+html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif; background: transparent; }
+
+.card {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+  transition: background 0.15s ease;
+}
+
+.titlebar {
+  -webkit-app-region: drag;
+  cursor: move;
+  display: flex;
+  align-items: center;
+  /* 편집 중이 아닐 때 버튼들이 숨어도 타이틀바 높이가 그대로 유지되게 고정 —
+     예전엔 버튼(약 20px)이 사라지면 바가 얇아지면서 본문 글이 위로 살짝 밀렸음 */
+  min-height: 36px;
+  /* (수정) justify-content:space-between 대신 gap 하나로 통일해서, 버튼 그룹(titlebar-actions)과
+     그 다음 그룹(titlebar-persistent-actions) 사이만 유독 벌어져 보이던 걸 없앰. 주제칸은
+     왼쪽에 붙고, 버튼들은 titlebar-actions의 margin-left:auto로 오른쪽에 모여서 전부 같은
+     간격(4px)으로 보임 */
+  gap: 4px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topic-chip {
+  -webkit-app-region: no-drag;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  cursor: text;
+}
+/* 제목을 직접 지정한 메모는 주제 라벨 스타일(작은 대문자) 대신 진짜 제목처럼 굵게 보여줌 */
+.topic-chip.has-title {
+  font-weight: 700;
+  font-size: 12.5px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+}
+.title-input {
+  display: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ink-soft);
+  outline: none;
+  padding: 0 0 1px;
+  width: 160px;
+  -webkit-app-region: no-drag;
+}
+
+/* ---- 설정창이 열려있는 동안: 이 메모의 편집 전체를 잠금 (접기/닫기 버튼은 예외, titlebar-persistent-actions에 있어서 원래 안 잠김) ---- */
+.card.locked .titlebar-actions,
+.card.locked .bottombar,
+.card.locked .canvas-layer,
+.card.locked .checklist-area,
+.card.locked .topic-chip {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+/* ---- 최초 설치 직후 웰컴창이 열려있는 동안: 이 메모창 전체를 잠금 ---- */
+.card.welcome-locked {
+  pointer-events: none;
+}
+
+.titlebar-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto; /* 주제칸/제목입력을 왼쪽에 붙이고, 버튼 그룹들은 오른쪽으로 모음 */
+  max-height: 40px;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-height 0.15s ease, opacity 0.15s ease;
+}
+
+/* ---- 접기/닫기 버튼
+   (9차 수정) 펼쳐진 상태에서는 편집(포커스) 중이 아니면 다른 버튼들처럼 숨김.
+   단, 접힌 상태는 예외 — 접힌 메모는 텍스트영역이 없어서 포커스를 줄 방법이
+   아예 없으므로, 여기 버튼까지 숨으면 다시 펼 방법이 사라짐. 그래서 접힌
+   상태일 때만은 포커스 여부와 상관없이 항상 보이게 유지함(아래 별도 규칙) ---- */
+.titlebar-persistent-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.card:not(:focus-within):not(.collapsed) .titlebar-persistent-actions {
+  display: none;
+}
+
+.color-input {
+  width: 20px; height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.chip-btn {
+  font-size: 11px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  border-radius: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.chip-btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* MD내보내기 후 동작: 글자 버튼 대신 동그라미 아이콘만으로 표시
+   (초록=유지, 빨강=전송후삭제). 진하게 표시되면 이 메모만 따로 고정한 것,
+   흐리게 표시되면 기본값을 그대로 따르는 중이라는 뜻(자세한 설명은 마우스 오버 툴팁) */
+.status-dot-btn {
+  -webkit-app-region: no-drag;
+  width: 11px;
+  height: 11px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+.status-dot-btn.dot-keep { background: #3C9A5F; }
+.status-dot-btn.dot-delete { background: #C8281E; }
+.status-dot-btn.active { opacity: 1; box-shadow: 0 0 0 2px rgba(0,0,0,0.12); }
+
+.icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn:hover { background: var(--overlay-hover); color: var(--ink); }
+.pin-btn.active { background: var(--ink); color: var(--paper); }
+
+/* ---- 메모 접기/펼치기 버튼: 포커스 여부와 상관없이 항상 눌러서 접고 펼 수 있어야 함 ---- */
+.collapse-toggle-btn { flex-shrink: 0; transition: transform 0.15s ease; }
+
+/* ---- 접힘 상태: 타이틀바만 남기고 나머지는 숨김, 주제/제목은 항상 보이게 함 ---- */
+.card.collapsed .editor-area,
+.card.collapsed .checklist-area,
+.card.collapsed .attachment-strip,
+.card.collapsed .bottombar {
+  display: none;
+}
+.card.collapsed .topic-chip { display: inline-block !important; }
+.card.collapsed .collapse-toggle-btn { transform: rotate(-90deg); }
+
+/* ---- 하단 통합 바 ----
+   예전엔 서식 툴바가 본문 "위"에 있어서, 편집을 시작/종료할 때 툴바가 나타났다 사라지며
+   본문 글이 위아래로 밀리는 문제가 있었음 → 전부 본문 "아래"로 모아서 해결.
+   구조: 윗줄(.bb-quick) = 실행취소/다시실행+체크리스트/첨부/특수문자+상태문구,
+   아랫줄(.bb-main) = 서식버튼(.toolbar, 왼쪽·좁으면 뒤부터 잘림) + 기능버튼(.footer-actions, 오른쪽 고정).
+   (변경) 예전 하단 바에 있던 "빈 곳을 잡고 창 옮기기"(app-region:drag)는 삭제 —
+   이동은 이제 상단 타이틀바로만 함(태훈님 요청) */
+.bottombar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--overlay);
+  max-height: 80px;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-height 0.15s ease, opacity 0.15s ease, padding 0.15s ease, border-color 0.15s ease;
+}
+/* 윗줄: 한 줄을 통째로 차지해서(flex-basis 100%) 자기 줄이 됨 */
+.bb-quick {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 100%;
+  min-width: 0;
+}
+/* 아랫줄: 서식(왼쪽) + 기능버튼(오른쪽) */
+.bb-main {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 서식 버튼들(B): 줄바꿈 없이 한 줄 고정. 창이 좁으면 기능버튼(A)을 밀지 않고
+   뒤쪽 버튼부터 잘려서 안 보이게 되고, 창을 넓히면 다시 나옴 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.toolbar > * { flex-shrink: 0; } /* 버튼이 찌그러지는 대신 잘리게 함 */
+.toolbar button,
+.bb-quick button {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.toolbar button:hover,
+.bb-quick button:hover { background: var(--overlay-hover); }
+.bottombar .sep {
+  width: 1px; height: 16px;
+  background: var(--line);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+/* MD 기능(서식버튼/메모연결/MD내보내기 등) 전체 켜고 끄기.
+   자리를 비워두지 않고 display:none으로 완전히 제거해서 남은 버튼들이 자동으로 당겨붙게 함 */
+body.md-off .md-feature { display: none !important; }
+/* MD기능을 끄면 서식 줄(.toolbar)이 통째로 사라지고,
+   윗줄이 더 이상 한 줄을 통째로 차지하지 않게 풀려서 기능버튼(A)과 한 줄로 합쳐짐 */
+body.md-off .toolbar { display: none; }
+body.md-off .bb-quick { flex: 0 1 auto; }
+.toolbar select {
+  font-size: 11.5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  height: 22px;
+  padding: 0 2px;
+}
+.special-char-group { display: flex; gap: 2px; flex-wrap: wrap; }
+.special-char-group:empty { display: none; }
+
+.editor-area {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 48px; /* 체크리스트가 길게 늘어나도 본문 입력창이 완전히 안 사라지도록 최소 높이는 남겨둠 */
+}
+.editor-area.drag-over {
+  outline: 2px dashed var(--ink-soft);
+  outline-offset: -4px;
+  background: var(--overlay);
+}
+
+textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: transparent;
+  font-family: inherit;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent; /* color-mix 미지원 환경 대비 폴백 */
+  scrollbar-color: color-mix(in srgb, var(--paper) 90%, black 10%) transparent;
+}
+textarea::-webkit-scrollbar { width: 6px; }
+textarea::-webkit-scrollbar-track { background: transparent; }
+textarea::-webkit-scrollbar-thumb {
+  background: var(--line); /* color-mix 미지원 환경 대비 폴백 */
+  background: color-mix(in srgb, var(--paper) 90%, black 10%);
+  border-radius: 3px;
+}
+textarea::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+textarea::-webkit-scrollbar-button:vertical:start,
+textarea::-webkit-scrollbar-button:vertical:end { display: none; height: 0; }
+textarea::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---- 붙여넣은/첨부한 이미지가 그림판처럼 본문 위에 자유롭게 놓이는 레이어 ---- */
+.canvas-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* 빈 공간은 클릭이 텍스트영역으로 그대로 전달됨 */
+  overflow: hidden;
+}
+.canvas-image {
+  position: absolute;
+  pointer-events: auto;
+  width: 140px;
+  height: 100px;
+}
+.canvas-image-body {
+  min-width: 60px;
+  min-height: 60px;
+  max-width: 360px;
+  max-height: 360px;
+  overflow: hidden;
+  resize: both;
+  cursor: move;
+  border-radius: 6px;
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+}
+
+/* 이미지에 딸린 설명칸. 이미지와는 완전히 별개의 위치를 가지는 독립된 상자라 원하는
+   방향 아무 곳에나 뗄 수 있고, 이미지를 옮기면 상대위치를 유지한 채 같이 따라감(memo.js) */
+.caption-box {
+  position: absolute;
+  pointer-events: auto;
+}
+.canvas-image-caption {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 60px;
+  min-height: 22px;
+  max-width: 360px;
+  max-height: 260px;
+  box-sizing: border-box;
+  border: none;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 10.5px;
+  font-family: inherit;
+  line-height: 1.4;
+  padding: 4px 6px;
+  border-radius: 6px;
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+  resize: both;
+  overflow: auto;
+  cursor: text;
+}
+.canvas-image-caption::placeholder { color: var(--ink-soft); opacity: 0.7; }
+/* 설명칸을 옮길 때 잡는 손잡이. 텍스트 입력칸 밖(모서리)에 살짝 걸쳐서 글자 입력과 헷갈리지 않게 함 */
+.caption-move-handle {
+  position: absolute;
+  top: -8px; left: -8px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  color: var(--paper);
+  font-size: 9px;
+  line-height: 1;
+  cursor: move;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.card:not(:focus-within) .caption-move-handle { display: none; }
+.canvas-image img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+/* 삭제 버튼은 리사이즈영역(overflow:hidden) 밖의 바깥 래퍼에 둬서 잘리지 않고 모서리 밖으로 튀어나오게 함 */
+.canvas-image .attachment-remove {
+  top: -6px;
+  right: -6px;
+}
+.card:not(:focus-within) .canvas-image .attachment-remove { display: none; }
+
+/* ---- 체크리스트: textarea 안에서는 실제 체크박스/취소선을 못 그리기 때문에,
+   이미지 첨부처럼 본문과는 별도인 목록 영역으로 둠. 툴바 바로 아래(본문 textarea보다 위)에
+   둬서, 본문이 짧을 때 textarea의 flex:1 이 남는 공간을 전부 차지하며 체크리스트를
+   창 맨 아래로 밀어내 버리는 것을 방지함 (textarea는 항상 그 아래 나머지 공간을 채움) ---- */
+.checklist-area {
+  padding: 6px 10px;
+  border-bottom: 1px dashed var(--line);
+  flex-shrink: 0;
+}
+.checklist-area[hidden] { display: none; }
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.checklist-item input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.checklist-item-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  word-break: break-word;
+  cursor: text;
+}
+.checklist-item-text:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-soft);
+}
+.checklist-item.checked .checklist-item-text {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+  opacity: 0.8;
+}
+.checklist-item-del {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.checklist-item-del:hover { background: var(--overlay-hover); color: #B33A2E; }
+
+.checklist-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.checklist-add-btn {
+  flex: 1;
+  min-width: 0;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: center;
+}
+.checklist-add-btn:hover { background: var(--overlay); color: var(--ink); }
+
+/* 체크리스트를 통째로 취소하고 싶을 때 쓰는 되돌리기 버튼(항목별 × 와는 별개) */
+.checklist-revert-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.checklist-revert-btn:hover { background: var(--overlay); color: var(--ink); }
+
+.attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  overflow: hidden;
+  max-height: 400px;
+  opacity: 1;
+  transition: max-height 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
+}
+.attachment-strip:empty { display: none; }
+.attachment-item {
+  position: relative;
+  flex-shrink: 0;
+}
+.attachment-file {
+  font-size: 10px;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  padding-right: 18px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--paper);
+}
+.attachment-file-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+.attachment-file-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.attachment-remove {
+  position: absolute;
+  top: -5px; right: -5px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  border: none;
+  background: #B33A2E;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.attachment-remove:hover { background: #8F2A20; }
+
+/* (수정) 예전엔 상태 문구(저장 완료 메시지 등)가 길어지면 오른쪽 버튼들 자리를 밀어서
+   MD내보내기 버튼이 좁아지고 글자가 두 줄로 밀리는 문제가 있었음. 상태 문구 쪽을
+   말줄임표(...)로 줄어들게 하고, 버튼 묶음(.footer-actions)은 항상 원래 크기를 유지하게 함 */
+.status {
+  font-size: 11px;
+  color: var(--ink-soft);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 기능 버튼 묶음(A): 항상 오른쪽 끝에 고정, 절대 잘리거나 밀리지 않음 */
+.footer-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
+
+.footer-icon-btn {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-soft);
+  border-radius: 5px;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.footer-icon-btn:hover { color: var(--ink); background: var(--overlay); }
+
+/* ---- 편집 중이 아닐 때는 버튼/스크롤/주제칸/안내문구까지 숨기고 텍스트만 깔끔하게 보여줌
+   (수정) display:none으로 훅 없애버리면 본문 텍스트가 순간적으로 확 밀렸다 당겨졌다 해서
+   거슬린다는 피드백이 있어서, max-height+opacity를 0으로 부드럽게 줄어들게 바꿈(완전히
+   안 밀리는 건 아니지만 훨씬 부드럽게 보임) ---- */
+.card:not(:focus-within) .titlebar-actions,
+.card:not(:focus-within) .bottombar,
+.card:not(:focus-within) .attachment-strip {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-color: transparent;
+  pointer-events: none;
+}
+.card:not(:focus-within) .topic-chip:not(.has-title) {
+  display: none;
+}
+/* 체크리스트는 버튼류가 아니라 콘텐츠(할일 목록)라서, 편집 중이 아니어도 항상 보여야
+   한 눈에 완료 여부를 확인할 수 있음. 삭제(×)/추가 버튼 같은 조작용 요소만 편집 중일 때 나타남 */
+.card:not(:focus-within) .checklist-item-del,
+.card:not(:focus-within) .checklist-actions {
+  display: none;
+}
+.card:not(:focus-within) .titlebar { border-bottom-color: transparent; }
+.card:not(:focus-within) textarea { overflow: hidden; }
+.card:not(:focus-within) textarea::placeholder { color: transparent; }
+.card:focus-within textarea { overflow-y: auto; }
+
+/* ---- 파일명 입력 모달 (Electron은 window.prompt를 지원하지 않아 직접 구현) ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  -webkit-app-region: no-drag;
+}
+.modal-overlay[hidden] { display: none; }
+.modal-box {
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 16px;
+  width: 220px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+.modal-title {
+  font-size: 12px;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.modal-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  outline: none;
+  color: var(--ink);
+  background: #fff;
+  margin-bottom: 10px;
+}
+.modal-hint {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  margin: -6px 0 10px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* ---- 메모 연결(다른 메모로 [[링크]] 걸기) 모달 ---- */
+.memo-link-box { width: 300px; }
+.memo-link-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+.memo-link-group-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--overlay);
+  padding: 4px 8px;
+}
+.memo-link-item {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  border-top: 1px solid var(--line);
+}
+.memo-link-item:hover { background: var(--overlay-hover); }
+.memo-link-item .memo-link-item-file {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-soft);
+  margin-top: 1px;
+}
+.memo-link-empty {
+  padding: 12px 8px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+/* ---- 다른 주제로 이동 모달 ---- */
+.move-topic-item { display: flex; align-items: center; gap: 8px; }
+.move-topic-item .swatch {
+  width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; white-space: nowrap;
+}
+.modal-btn {
+  border: none;
+  border-radius: 5px;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.modal-btn-cancel { background: var(--overlay); color: var(--ink-soft); }
+.modal-btn-cancel:hover { background: var(--overlay-hover); }
+.modal-btn-confirm { background: var(--ink); color: var(--paper); }
+.modal-btn-confirm:hover { opacity: 0.85; }
+
+.export-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.export-btn:hover { opacity: 0.85; }
+/* 마지막으로 내보낸 뒤로 수정된 내용이 없을 때(더 내보낼 게 없을 때) 흐리게 표시.
+   크기/모양은 그대로 두고 색만 흐리게 해서 "또 눌러도 새로 만들 게 없다"는 걸 보여줌 */
+.export-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.export-btn:disabled:hover { opacity: 0.4; }
+.export-btn:active { transform: translateY(1px); }
