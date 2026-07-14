@@ -1,6 +1,9 @@
 # Memo.md (NEMO)
 
-바탕화면 메모 위젯 + 옵시디언(MD) 내보내기. 현재 버전: 1.8.3
+바탕화면 메모 위젯 + 옵시디언(MD) 내보내기. 현재 버전: 1.8.12
+
+![위젯 사용 모습](screenshots/widget-demo.gif)
+![메모 체크리스트와 이미지 첨부](screenshots/checklist-demo.gif)
 
 ## 이 앱을 만든 이유
 
