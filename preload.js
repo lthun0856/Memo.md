@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('api', {
   resizeWidget: (width, height) => ipcRenderer.invoke('widget:resize', { width, height }),
   setWidgetAlwaysOnTop: (value) => ipcRenderer.invoke('widget:setAlwaysOnTop', value),
   setWidgetCollapsed: (value) => ipcRenderer.invoke('widget:setCollapsed', value),
+  setWidgetHandleOnly: (value) => ipcRenderer.invoke('widget:setHandleOnly', value),
   openMemoLinkWindow: (memoId) => ipcRenderer.invoke('window:openMemoLink', memoId),
   closeMemoLinkWindow: () => ipcRenderer.invoke('window:closeMemoLink'),
   chooseMemoLink: (fileNameNoExt) => ipcRenderer.invoke('memoLink:choose', fileNameNoExt),

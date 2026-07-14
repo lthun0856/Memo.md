@@ -1310,7 +1310,7 @@ function openMemoLinkPopup() {
   window.api.openMemoLinkWindow(memo.id);
 }
 
-function insertMemoLink(fileNameNoExt) {
+async function insertMemoLink(fileNameNoExt) {
   const ta = els.content;
   const link = `[[${fileNameNoExt}]]`;
   const current = ta.value;
@@ -1319,8 +1319,30 @@ function insertMemoLink(fileNameNoExt) {
   ta.focus();
   const end = ta.value.length;
   ta.setSelectionRange(end, end);
+  memo.content = ta.value;
   markExportDirty();
-  scheduleSave();
+
+  // 원래는 scheduleSave()로 0.5초 뒤에 저장했는데, 이미 한 번 내보낸 메모면 바로 이어서
+  // 재내보내기를 하기 때문에 그 0.5초를 기다리면 안 됨(기다리면 방금 붙인 링크 문장이
+  // 빠진 옛날 내용으로 내보내질 위험이 있음) — 그래서 지연 저장 대신 여기서 즉시 저장을
+  // 확정한 뒤에 내보내기를 이어감
+  clearTimeout(saveTimer);
+  await window.api.updateMemoContent(memo.id, memo.content);
+
+  // 이미 한 번 MD로 내보낸 메모라면, 링크가 추가된 최신 내용으로 바로 재내보내기해서
+  // 파일을 최신 상태로 맞춰줌 — 버튼을 다시 누르게 하지 않고 여기서 끝내기 때문에,
+  // 내보내기가 이미 끝난 상태이므로 버튼은 계속 비활성 상태로 유지됨
+  if (memo.obsidian && memo.obsidian.saved) {
+    try {
+      const result = await window.api.exportToObsidian(memo.id, undefined, []);
+      els.statusText.textContent = fmt(LANG.memo.exportDoneOverwrite, { fileName: result.fileName });
+      memo.obsidian = { saved: true, filePath: result.filePath };
+      exportUpToDate = true;
+      renderExportButtonState();
+    } catch (err) {
+      els.statusText.textContent = fmt(LANG.memo.saveFailed, { message: err.message });
+    }
+  }
 }
 
 window.api.onMemoLinkSelected((fileNameNoExt) => insertMemoLink(fileNameNoExt));

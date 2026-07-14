@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
     height: 360,
     alwaysOnTop: true,
     collapsed: false,
+    handleOnly: false, // 접힘 상태에서 손잡이(⠿)만 남기고 더 축소했는지 (기존 사용자는 저장된 값이 없어도 undefined→false로 동일하게 동작함)
     // 펼친 상태의 "진짜" 가로 크기. 접힘 상태에서는 주제 버튼 개수에 맞춰 width가 자동으로
     // 늘고 줄어드는데(위젯 접힘/펼침 가로 자동확장 기능), 그 임시 값이 펼친 상태의 폭까지
     // 덮어써버리지 않도록 height/expandedHeight와 똑같은 방식으로 분리해서 따로 저장함

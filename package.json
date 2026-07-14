@@ -1,6 +1,6 @@
 {
   "name": "memo.md",
-  "version": "1.8.3",
+  "version": "1.8.12",
   "description": "바탕화면 메모장 - MD내보내기",
   "main": "main.js",
   "scripts": {

@@ -84,6 +84,20 @@ function currentOpacity() {
 // ---------- 창 생성 ----------
 
 function createMemoWindow(memo, options = {}) {
+  // 이미 내보낸 적 있는 메모라면, 실제 내보낸 파일이 지금도 있는지 열 때마다 확인함.
+  // 앱이 Vault 폴더를 계속 감시하고 있는 건 아니라서, 폴더에서 파일을 직접 지웠어도
+  // 그 사이엔 모르고 있다가 이렇게 다음에 열 때 확인해서 알아챔 — 파일이 없으면
+  // "내보내기 완료" 표시를 지우고 내보내기 버튼이 다시 눌리게 해줌
+  if (memo.obsidian && memo.obsidian.saved && memo.obsidian.filePath && !fs.existsSync(memo.obsidian.filePath)) {
+    memo.obsidian = { saved: false, filePath: null };
+    const memos = store.getMemos();
+    const idx = memos.findIndex((m) => m.id === memo.id);
+    if (idx !== -1) {
+      memos[idx].obsidian = memo.obsidian;
+      store.saveMemos(memos);
+    }
+  }
+
   const win = new BrowserWindow({
     width: memo.size?.width || 320,
     height: memo.collapsed ? MEMO_COLLAPSED_HEIGHT : (memo.size?.height || 380),
@@ -209,7 +223,9 @@ function createWidgetWindow(initialPos) {
     hasShadow: false,
     roundedCorners: false, // 모서리를 각지게(직각)로
     alwaysOnTop: settings.widget.alwaysOnTop !== false,
-    resizable: true,
+    // 완전축소 상태로 종료했다가 다시 켠 경우, 시작부터 크기 조절이 막혀 있어야
+    // widget:setHandleOnly에서 켠 잠금과 어긋나지 않음
+    resizable: !settings.widget.handleOnly,
     maximizable: false, // 타이틀바(드래그 영역) 더블클릭시 전체화면으로 "터지는" 것 방지 — 위젯은 전체화면일 필요가 없음
     skipTaskbar: true,
     opacity: currentOpacity(),
@@ -1949,12 +1965,18 @@ ipcMain.handle('window:refocusSelf', (event) => {
 ipcMain.handle('widget:resize', (event, { width, height }) => {
   const settings = store.getSettings();
   if (!widgetWindow || !settings.widget.autoResize) return;
+  // (수정) 완전축소(handleOnly) 상태로 잠긴(setResizable(false)) 채로 setSize를 하면
+  // 창이 안 줄어들거나 안 늘어나는 문제가 있어서, 크기를 바꿀 땐 항상 잠깐 풀었다가 바꾸고
+  // 완전축소 상태일 때만 바꾼 뒤 다시 잠금
+  const wasLocked = !widgetWindow.isResizable();
+  if (wasLocked) widgetWindow.setResizable(true);
   if (settings.widget.collapsed) {
     // 접힘 상태에서도 폭(주제 버튼 개수에 맞춤)은 자동 조절 허용, 높이는 항상 접힘 높이로 고정
     widgetWindow.setSize(Math.round(width), WIDGET_COLLAPSED_HEIGHT);
   } else {
     widgetWindow.setSize(Math.round(width), Math.round(height));
   }
+  if (settings.widget.handleOnly) widgetWindow.setResizable(false);
 });
 
 // 위젯 자체 항상위 on/off
@@ -1963,6 +1985,19 @@ ipcMain.handle('widget:setAlwaysOnTop', (event, value) => {
   settings.widget.alwaysOnTop = !!value;
   store.saveSettings(settings);
   if (widgetWindow) widgetWindow.setAlwaysOnTop(!!value);
+  return settings.widget;
+});
+
+// 위젯이 접힌 상태에서, 이동손잡이만 남기고 주제버튼/다른 버튼까지 다 숨기는 완전축소 (세션 간 유지)
+// 실제 창 폭 축소는 렌더러(widget.js)가 손잡이의 실제 렌더링 크기를 재서 widget:resize로 요청함.
+// (수정) 완전축소 상태에서 창 테두리를 마우스로 끌면 크기(특히 세로)가 임의로 바뀌던 문제가 있어서
+// 크기 조절 자체를 잠그기로 했는데, 여기서 바로 잠가버리면(setResizable(false)) 뒤이어
+// widget:resize가 요청하는 축소가 안 먹는 문제가 생겨서, 잠금/해제는 실제 크기변경이 일어나는
+// widget:resize 쪽에서 처리하도록 옮김 (여긴 설정값만 저장)
+ipcMain.handle('widget:setHandleOnly', (event, value) => {
+  const settings = store.getSettings();
+  settings.widget.handleOnly = !!value;
+  store.saveSettings(settings);
   return settings.widget;
 });
 
