@@ -27,6 +27,7 @@
           <span class="field-label" id="categoryFieldLabel"></span>
           <div id="categoryList" class="category-list"></div>
           <div class="topic-form-row">
+            <input type="color" id="newCategoryColor" value="#8A8574" />
             <div class="field field-grow">
               <input type="text" id="newCategoryName" />
             </div>
@@ -59,15 +60,33 @@
               <input type="text" id="newTopicDefaultTitle" />
             </div>
           </div>
+          <div class="topic-form-row">
+            <label class="check-row"><input type="checkbox" id="newTopicSkipTitle" /> <span id="newTopicSkipTitleLabel"></span></label>
+          </div>
+          <div class="topic-form-row">
+            <label class="check-row"><input type="checkbox" id="newTopicUseCalendar" checked /> <span id="newTopicUseCalendarLabel"></span></label>
+          </div>
           <div class="topic-form-row topic-form-row-appearance">
             <div class="field">
               <span class="field-label" id="newTopicCharLabel"></span>
               <input type="text" id="newTopicChar" maxlength="2" class="char-input" />
             </div>
             <div class="field-color-group">
-              <label class="mini-label"><span id="newTopicColorLabel"></span> <input type="color" id="newTopicColor" value="#8A8574" /></label>
-              <label class="mini-label"><span id="newTopicTextColorLabel"></span> <input type="color" id="newTopicTextColor" value="#FFFFFF" /></label>
-              <label class="mini-label"><span id="newTopicMemoColorLabel"></span> <input type="color" id="newTopicMemoColor" value="#8A8574" /></label>
+              <span class="color-copy-pair">
+                <label class="mini-label"><span id="newTopicColorLabel"></span> <input type="color" id="newTopicColor" value="#8A8574" /></label>
+                <button type="button" class="copy-color-btn" data-copy-for="newTopicColor"></button>
+                <button type="button" class="paste-color-btn" data-paste-for="newTopicColor"></button>
+              </span>
+              <span class="color-copy-pair">
+                <label class="mini-label"><span id="newTopicTextColorLabel"></span> <input type="color" id="newTopicTextColor" value="#FFFFFF" /></label>
+                <button type="button" class="copy-color-btn" data-copy-for="newTopicTextColor"></button>
+                <button type="button" class="paste-color-btn" data-paste-for="newTopicTextColor"></button>
+              </span>
+              <span class="color-copy-pair">
+                <label class="mini-label"><span id="newTopicMemoColorLabel"></span> <input type="color" id="newTopicMemoColor" value="#8A8574" /></label>
+                <button type="button" class="copy-color-btn" data-copy-for="newTopicMemoColor"></button>
+                <button type="button" class="paste-color-btn" data-paste-for="newTopicMemoColor"></button>
+              </span>
             </div>
           </div>
           <p class="hint hint-error" id="topicNameError" hidden></p>
@@ -103,6 +122,21 @@
           <span id="opacityValue" style="width:40px;text-align:right;">100%</span>
         </div>
       </section>
+
+      <section>
+        <h2 id="fontHeading"></h2>
+        <p class="hint" id="fontHint"></p>
+        <div class="row">
+          <select id="fontFamily" style="flex:1;"></select>
+        </div>
+        <div class="row" id="fontCustomRow" hidden>
+          <input type="text" id="fontFamilyCustom" style="flex:1;" />
+        </div>
+        <p class="hint" id="fontCustomHint" hidden></p>
+        <div id="fontPreview" class="font-preview"></div>
+      </section>
+
+      <!-- 달력·가계부 설정은 달력창의 ⚙️ 버튼으로 이동함(태훈님 요청 2026-07-24) -->
 
       <section>
         <h2 id="backupHeading"></h2>
@@ -164,6 +198,11 @@
           <label><span id="widgetWidthLabel"></span> <input type="number" id="widgetWidth" min="180" max="600" /></label>
           <label><span id="widgetHeightLabel"></span> <input type="number" id="widgetHeight" min="200" max="900" /></label>
         </div>
+
+        <p class="subgroup-label with-divider" id="widgetHandlePositionGroupLabel"></p>
+        <label class="check-row"><input type="radio" name="handlePosition" value="left" id="handlePositionLeft" /> <span id="handlePositionLeftLabel"></span></label>
+        <label class="check-row"><input type="radio" name="handlePosition" value="right" id="handlePositionRight" /> <span id="handlePositionRightLabel"></span></label>
+        <p class="hint" id="handlePositionHint"></p>
 
         <p class="subgroup-label with-divider" id="widgetGestureGroupLabel"></p>
         <div class="row">
@@ -285,6 +324,7 @@
 
     <div class="save-bar">
       <span id="saveStatus"></span>
+      <span id="appVersionLabel" class="app-version-label"></span>
       <button id="btnCancel" class="save-btn cancel-btn"></button>
       <button id="btnApply" class="save-btn apply-btn"></button>
       <button id="btnSave" class="save-btn"></button>
@@ -302,6 +342,7 @@
     </div>
   </div>
 
+  <script src="../common/appFont.js"></script>
   <script src="../lang/ko.js"></script>
   <script src="settings.js"></script>
 </body>

@@ -132,3 +132,34 @@ code {
   color: #6B6551;
   text-align: center;
 }
+
+
+/* ---- (도움말 개편) 화면 그림 ---- */
+figure { margin: 10px 0 12px; }
+.shot {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 1px solid #D8D2BC;
+  border-radius: 8px;
+  background: #FFFFFF;
+}
+.shot-cap {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #6B6551;
+  text-align: center;
+  margin: 6px 0 0;
+}
+
+/* 설정창 안(도움말 탭)처럼 폭이 좁을 때도 안 깨지게 */
+@media (max-width: 560px) {
+  .wrap { padding: 16px 14px 32px; }
+  .toc { padding: 8px; gap: 5px; }
+  .toc-chip { font-size: 11px; padding: 4px 8px 4px 7px; }
+  .doc-section { padding: 4px 12px 12px; }
+}
+
+/* 앱 전체 글씨체(설정 > 글씨체). 안 골랐으면 기본값 그대로 */
+body { font-family: var(--app-font, -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif); }

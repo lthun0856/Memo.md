@@ -63,6 +63,32 @@ function serializeChecklist(items) {
     .join('\n');
 }
 
+// 표 칸 글자 안의 "|"(칸 구분자)와 줄바꿈은 마크다운 표 문법을 깨뜨리므로 이스케이프/치환함
+function serializeTableCell(text) {
+  return (text || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+// 표 데이터(rows[0]=머리글 줄) 하나를 표준 마크다운 표 문법(머리글+구분줄(필수)+데이터줄)으로 변환
+function serializeTable(table) {
+  const rows = table && Array.isArray(table.rows) ? table.rows : [];
+  if (!rows.length || !rows[0].length) return '';
+  const cols = rows[0].length;
+  const headerLine = `|${rows[0].map(serializeTableCell).join('|')}|`;
+  const dividerLine = `|${Array(cols).fill('---').join('|')}|`;
+  const dataLines = rows.slice(1).map((r) => `|${r.map(serializeTableCell).join('|')}|`);
+  return [headerLine, dividerLine, ...dataLines].join('\n');
+}
+
+// (0.19.1 안내) 체크리스트·표는 이제 본문 안에 글자로 들어가므로 memo.checklist / memo.tables는
+// 항상 빈 배열이고, 아래 코드는 평소엔 아무 일도 하지 않는다.
+// 그래도 지우지 않고 남겨둠 — 변환(main.js)은 백업을 못 뜨면 안전을 위해 건너뛰는데, 그 경우
+// 예전 구조가 그대로 남아있게 된다. 그때 이 코드가 없으면 내보낸 md에서 표가 통째로 빠진다.
+// 표 목록 전체를 변환. 표가 여러 개면 표 사이는 빈 줄로 구분(serializeChecklist와 같은 자리에 씀)
+function serializeTables(tables) {
+  if (!tables || !tables.length) return '';
+  return tables.map(serializeTable).filter(Boolean).join('\n\n');
+}
+
 function todayDateStr() {
   const now = new Date();
   const y = now.getFullYear();
@@ -71,13 +97,27 @@ function todayDateStr() {
   return `${y}${m}${d}`;
 }
 
+// 일정 날짜("YYYY-MM-DDTHH:mm")를 파일명용 "YYYYMMDD"로. 값이 없거나 형식이 이상하면 null.
+function scheduleDateStr(scheduleAt) {
+  const d = (scheduleAt || '').slice(0, 10).replace(/-/g, '');
+  return /^\d{8}$/.test(d) ? d : null;
+}
+
+// 일정 날짜를 옵시디언 "date" 속성값으로. 시간이 00:00이면 날짜만(2026-05-06),
+// 시간이 있으면 옵시디언 날짜&시간 형식(2026-05-06T12:30:00)으로. 값이 없으면 null.
+function scheduleDateProp(scheduleAt) {
+  if (!scheduleAt || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(scheduleAt)) return null;
+  const [d, t] = scheduleAt.split('T');
+  return (!t || t === '00:00') ? d : `${d}T${t}:00`;
+}
+
 /**
  * 파일명 규칙(기본값): 주제_제목(없으면 제목없음)_YYYYMMDD_001
  * 순서는 항상 주제 → 제목 → 날짜 → 번호로 고정되며, rule로 각 항목의 포함 여부와 구분자만 조절 가능.
  * 채번(001, 002...)은 같은 조합의 파일이 이미 있으면 다음 번호로, 날짜를 포함하는 경우
  * 날짜가 바뀌면 그 날짜의 파일이 아직 없으니 자동으로 001부터 다시 시작됨
  */
-function suggestFileName({ vaultPath, topic, title, rule }) {
+function suggestFileName({ vaultPath, topic, title, rule, scheduleAt }) {
   const r = rule || {};
   const sep = typeof r.separator === 'string' ? r.separator : '_';
   const topicPart = sanitizeFileName(topic ? topic.name : '미분류');
@@ -87,7 +127,8 @@ function suggestFileName({ vaultPath, topic, title, rule }) {
   if (r.includeTitle !== false) {
     parts.push(sanitizeFileName(title && title.trim() ? title.trim() : '제목없음'));
   }
-  if (r.includeDate !== false) parts.push(todayDateStr());
+  // 날짜 부분: 일정 날짜를 정해둔 메모면 저장날짜 대신 그 일정 날짜(YYYYMMDD)를 씀
+  if (r.includeDate !== false) parts.push(scheduleDateStr(scheduleAt) || todayDateStr());
 
   const base = parts.length ? parts.join(sep) : '메모';
 
@@ -114,9 +155,12 @@ function suggestFileName({ vaultPath, topic, title, rule }) {
 // 본문에 아직 없는 첨부 이미지를 "![[파일명]]" 임베드 구문으로, 캡션(설명)을 달아둔 이미지는
 // 그 바로 아래 줄에 기울임체로 캡션을 붙여서 돌려줌. 단일 옵시디언 내보내기와 전체
 // 백업(exportAllMemos/exportAllMemosOverwrite) 양쪽에서 공용으로 씀
+// (0.19.2) 이미 본문에 있는지 검사할 때 "![[파일명]]" 로 딱 맞춰 보면 안 됨 —
+// 3단계부터 크기가 붙은 "![[파일명|400]]" 형태가 생겨서, 그대로 두면 본문에 멀쩡히 있는
+// 그림을 "없다"고 보고 md 맨 뒤에 한 번 더 붙여버림. 그래서 여는 부분까지만 검사함
 function buildMissingEmbedBlocks(content, attachments) {
   return (attachments || [])
-    .filter((a) => !(content || '').includes(`![[${a.storedName}]]`))
+    .filter((a) => !(content || '').includes(`![[${a.storedName}`))
     .map((a) => {
       const embed = `![[${a.storedName}]]`;
       return a.caption && a.caption.trim() ? `${embed}\n*${a.caption.trim()}*` : embed;
@@ -163,8 +207,10 @@ function exportMemoToObsidian({
   customFileName,
   attachments = [],
   checklist = [],
+  tables = [],
   attachDir,
-  overwritePath
+  overwritePath,
+  scheduleAt
 }) {
   if (!vaultPath) {
     throw new Error('Vault 경로가 설정되지 않았습니다.');
@@ -215,6 +261,9 @@ function exportMemoToObsidian({
     tags.forEach((t) => frontmatterLines.push(`  - ${t}`));
   }
   frontmatterLines.push(`created: ${new Date().toISOString()}`);
+  // 일정 날짜를 정해둔 메모면 옵시디언 "date" 속성으로 넣어줌(속성 패널/달력 플러그인이 인식)
+  const dateProp = scheduleDateProp(scheduleAt);
+  if (dateProp) frontmatterLines.push(`date: ${dateProp}`);
   frontmatterLines.push('---', '');
 
   const inlineTags = tags.map((t) => `#${t}`).join(' ');
@@ -225,6 +274,10 @@ function exportMemoToObsidian({
   // 체크리스트 항목은 본문 뒤에 옵시디언이 그대로 체크박스로 인식하는 마크다운 문법으로 붙여줌
   const checklistText = serializeChecklist(checklist);
   if (checklistText) bodyParts.push('', checklistText);
+
+  // 표도 체크리스트와 같은 자리에, 옵시디언이 그대로 표로 인식하는 마크다운 문법으로 붙여줌
+  const tablesText = serializeTables(tables);
+  if (tablesText) bodyParts.push('', tablesText);
 
   // 본문 텍스트에 아직 참조되지 않은 첨부파일은 자동으로 임베드 구문(+캡션이 있으면 그 아래에)을 덧붙임
   // (앱 안에서는 텍스트에 마크다운 구문을 넣지 않고 화면에 이미지로만 배치하므로,
@@ -277,9 +330,11 @@ function exportAllMemos({ baseDir, memos, topics, formats, attachDir }) {
     if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
 
     const checklistText = serializeChecklist(memo.checklist);
+    const tablesText = serializeTables(memo.tables);
+    const extraText = [checklistText, tablesText].filter(Boolean).join('\n\n');
     const content = (memo.content || '');
-    let fullContent = checklistText
-      ? `${content.replace(/\s+$/, '')}\n\n${checklistText}`
+    let fullContent = extraText
+      ? `${content.replace(/\s+$/, '')}\n\n${extraText}`
       : content;
 
     const embedBlocks = buildMissingEmbedBlocks(fullContent, memo.attachments);
@@ -328,9 +383,11 @@ function exportAllMemosOverwrite({ baseDir, memos, topics, format, attachDir }) 
     if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
 
     const checklistText = serializeChecklist(memo.checklist);
+    const tablesText = serializeTables(memo.tables);
+    const extraText = [checklistText, tablesText].filter(Boolean).join('\n\n');
     const content = memo.content || '';
-    let fullContent = checklistText
-      ? `${content.replace(/\s+$/, '')}\n\n${checklistText}`
+    let fullContent = extraText
+      ? `${content.replace(/\s+$/, '')}\n\n${extraText}`
       : content;
 
     const embedBlocks = buildMissingEmbedBlocks(fullContent, memo.attachments);

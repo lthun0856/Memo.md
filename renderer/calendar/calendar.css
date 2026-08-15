@@ -1,0 +1,820 @@
+/* 달력 창 스타일 — 기존 앱(종이 테마: --paper #F7F4EC, 상단바 #2B2820)과 통일 */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --paper: #F7F4EC;
+  --paper-line: #E6E0D2;
+  --ink: #2B2820;
+  --ink-soft: #6B6656;
+  --titlebar: #2B2820;
+  --titlebar-ink: #F7F4EC;
+  --today: #C9A24B;
+  --sun: #D65A5A;   /* 일요일/공휴일 */
+  --sat: #4A73C4;   /* 토요일 */
+  --other-month: #BDB8AA;
+  --past-bg: #EAE6DA;   /* 지난 날 칸 배경(종이색보다 한 톤 어둡게) */
+  --good: #5B8A3A;  /* 지출 감소 등 긍정 표시(--sun과 대비되는 톤) */
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  font-family: var(--app-font, "Malgun Gothic", "맑은 고딕", -apple-system, sans-serif);
+  color: var(--ink);
+  user-select: none;
+  overflow: hidden;
+}
+
+.cal-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  background: var(--paper);
+  border: 1px solid var(--paper-line);
+}
+
+/* ---- 상단 바 ---- */
+.cal-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--titlebar);
+  color: var(--titlebar-ink);
+  -webkit-app-region: drag;         /* 이 영역을 잡고 창 이동 */
+  flex: 0 0 auto;
+}
+.cal-titlebar button { -webkit-app-region: no-drag; }  /* 버튼은 클릭 되게 */
+
+.cal-nav { display: flex; align-items: center; gap: 4px; }
+
+.cal-navbtn,
+.cal-todaybtn,
+.cal-closebtn {
+  background: transparent;
+  border: none;
+  color: var(--titlebar-ink);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+.cal-navbtn:hover,
+.cal-todaybtn:hover,
+.cal-closebtn:hover { background: rgba(255, 255, 255, 0.15); }
+
+.cal-todaybtn { font-size: 12px; }
+
+.cal-title {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.cal-closebtn { font-size: 13px; }
+
+/* ---- 월/주/일 보기 전환 버튼 ---- */
+.cal-viewswitch {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 5px;
+  padding: 2px;
+}
+.cal-viewbtn {
+  background: transparent;
+  border: none;
+  color: var(--titlebar-ink);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 3px 7px;
+}
+.cal-viewbtn:hover { background: rgba(255, 255, 255, 0.15); }
+.cal-viewbtn.active {
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---- 잠금(배경) 상태 — 더블클릭해야 조작 가능 ---- */
+.cal-lock {
+  display: none;
+  font-size: 11px;
+  opacity: 0.75;
+  -webkit-app-region: no-drag;
+}
+.cal-root.locked .cal-lock { display: inline; }
+/* 잠금 중엔 상단바 드래그로 창이 움직이지 않게(실수 이동 방지) */
+.cal-root.locked .cal-titlebar { -webkit-app-region: no-drag; }
+/* 잠금 중엔 손가락 커서·호버 효과도 없앰(누를 수 있는 것처럼 안 보이게) */
+.cal-root.locked .cal-titlebar button,
+.cal-root.locked .cal-cell,
+.cal-root.locked .cal-event { cursor: default; }
+.cal-root.locked .cal-cell:hover { background: transparent; }
+.cal-root.locked .cal-titlebar button:hover { background: transparent; }
+.cal-root.locked .cal-viewbtn:hover { background: transparent; }
+.cal-root.locked .cal-viewbtn.active,
+.cal-root.locked .cal-viewbtn.active:hover { background: var(--paper); } /* 현재 뷰 표시는 유지 */
+
+/* ---- 요일 헤더 ---- */
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--paper-line);
+  flex: 0 0 auto;
+}
+.cal-weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 0;
+  color: var(--ink-soft);
+}
+.cal-weekday.sun { color: var(--sun); }
+.cal-weekday.sat { color: var(--sat); }
+
+/* ---- 날짜 그리드 ---- */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-auto-rows: 1fr;
+  flex: 1 1 auto;
+}
+
+.cal-cell {
+  border-right: 1px solid var(--paper-line);
+  border-bottom: 1px solid var(--paper-line);
+  padding: 3px 4px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  cursor: pointer;
+}
+.cal-cell:nth-child(7n) { border-right: none; }
+.cal-cell:hover { background: rgba(201, 162, 75, 0.10); }
+
+.cal-daynum {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.cal-cell.sun .cal-daynum { color: var(--sun); }
+.cal-cell.sat .cal-daynum { color: var(--sat); }
+.cal-cell.holiday .cal-daynum { color: var(--sun); }
+.cal-cell.other-month .cal-daynum { color: var(--other-month); }
+.cal-cell.other-month { cursor: default; }
+.cal-cell.other-month:hover { background: transparent; }
+
+/* 오늘 강조 */
+.cal-cell.today .cal-daynum {
+  background: var(--today);
+  color: #fff;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---- 지난 날 / 오늘 / 다가올 날 구분 (2026-08-15 태훈님 확정) ----
+   ① 지난 날은 칸 배경을 한 톤 어둡게   ③ 오늘 칸에 금색 ㄱ자 테두리
+   ⑤ 다가올 날은 반대로 숫자·일정을 진하게
+   예전에는 날짜 숫자만 45%로 흐리게 했는데, 숫자가 12px밖에 안 돼서 구분이 잘 안 갔음.
+
+   [주의] 이 파일에는 칸 배경을 건드리는 규칙이 여러 개 있다(마우스 올림 / 잠금 / 지출 있는 칸).
+   같은 굵기의 규칙이라 나중에 나오는 쪽이 이기므로, 겹치는 경우를 아래에 하나씩 다 적어둠.
+   하나라도 빼면 "그 상황에서만" 구분이 사라진다. */
+.cal-cell.past { background: var(--past-bg); }
+.cal-cell.past:hover { background: rgba(201, 162, 75, 0.10); }
+.cal-root.locked .cal-cell.past:hover { background: var(--past-bg); }
+/* 지난 달·다음 달 칸은 원래 글자가 회색이라 여기서 또 흐리게 하면 거의 안 보임 */
+/* (2026-08-15 2차) 0.45는 칸 배경까지 어두워지니 너무 흐려서 안 읽혔음 → 0.68로 올림.
+   칸 배경만으로도 이미 구분이 되므로 글자는 읽히는 쪽을 우선함 */
+.cal-cell.past:not(.other-month) .cal-daynum { opacity: 0.68; font-weight: 500; }
+
+/* ⑤ 다가올 날 */
+.cal-cell.future:not(.other-month) .cal-daynum { font-weight: 700; }
+.cal-cell.future .cal-event { background: rgba(0, 0, 0, 0.055); }
+
+/* ③ 오늘 칸 — 왼쪽·위에 금색 선(ㄱ자). 칸 색은 안 건드려서 지저분해지지 않음 */
+.cal-cell.today { box-shadow: inset 3px 0 0 var(--today), inset 0 3px 0 var(--today); }
+
+/* ---- 공휴일 이름(숫자 밑에 작게, 빨간 글씨) ---- */
+.cal-holiday-name {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--sun);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-cell.other-month .cal-holiday-name { opacity: 0.4; }
+.cal-cell.past .cal-holiday-name { opacity: 0.68; }
+
+/* ---- 음력 날짜(숫자 밑에 작게) ---- */
+.cal-lunar {
+  display: block;
+  font-size: 9px;
+  line-height: 1.1;
+  color: var(--ink-soft);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cal-cell.other-month .cal-lunar { opacity: 0.4; }
+.cal-cell.past .cal-lunar { opacity: 0.62; }
+.cal-lunar-dayline {
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-soft);
+  padding: 6px 0 2px;
+  flex: 0 0 auto;
+}
+
+/* ---- 날짜 칸의 일정(메모) 칩 ---- */
+.cal-events {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  min-height: 0;
+}
+.cal-event {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 1px 3px;
+  border-left: 3px solid var(--today); /* 주제 색으로 개별 지정됨 */
+  background: rgba(0, 0, 0, 0.035);
+  border-radius: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cal-event-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.cal-event-bell { flex: 0 0 auto; font-size: 9px; }
+.cal-cell.other-month .cal-event { opacity: 0.5; }
+.cal-cell.past .cal-event { opacity: 0.72; }
+.cal-more {
+  font-size: 9px;
+  color: var(--ink-soft);
+  padding: 0 3px;
+}
+
+/* ---- 주간 뷰: 가로 7칸 한 줄(칸이 세로로 길어서 일정을 더 많이 보여줌) ---- */
+.cal-grid.week-mode { grid-auto-rows: 1fr; }
+.cal-grid.week-mode .cal-cell { padding: 4px 4px; }
+.cal-grid.week-mode .cal-event { white-space: normal; }        /* 제목 줄바꿈 허용 */
+.cal-grid.week-mode .cal-event-title { white-space: normal; word-break: break-all; }
+
+/* ---- 일간 뷰: 그날 일정 목록 하나로 표시 ---- */
+.cal-grid.day-mode { display: flex; flex-direction: column; }
+.cal-dayview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- 날짜 클릭시 뜨는 "그날 목록" 패널(창 전체를 덮는 오버레이) ---- */
+.cal-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+.cal-overlay-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--titlebar);
+  color: var(--titlebar-ink);
+  flex: 0 0 auto;
+}
+.cal-overlay-head .cal-ov-title {
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+.cal-ov-btn {
+  background: transparent;
+  border: none;
+  color: var(--titlebar-ink);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+.cal-ov-btn:hover { background: rgba(255, 255, 255, 0.15); }
+
+.cal-ov-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 6px;
+}
+.cal-ov-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-left: 4px solid var(--today);
+  background: #fff;
+  border-radius: 4px;
+  margin-bottom: 5px;
+  cursor: pointer;
+}
+.cal-ov-item:hover { background: #FBF9F3; }
+.cal-ov-item-title { flex: 1 1 auto; font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 시각은 눌러서 그 자리에서 고칠 수 있음(0.20.1) — 누를 수 있다는 게 보이게 표시 */
+.cal-ov-item-time {
+  font-size: 11px;
+  color: var(--ink-soft);
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: text;
+}
+.cal-ov-item-time:hover { background: var(--paper); border-color: var(--paper-line); }
+/* 시각을 안 적은 일정 — 흐린 '시각' 글자로 자리만 잡아둠 */
+.cal-ov-item-time.is-empty { color: var(--ink-soft); opacity: 0.45; }
+.cal-ov-item-timeedit {
+  flex: 0 0 58px;
+  width: 58px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--today);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 11px;
+  font-family: inherit;
+  text-align: center;
+  outline: none;
+}
+.cal-ov-empty { text-align: center; color: var(--ink-soft); font-size: 12px; padding: 20px 0; }
+
+.cal-ov-foot { flex: 0 0 auto; padding: 8px; border-top: 1px solid var(--paper-line); }
+.cal-newbtn {
+  width: 100%;
+  padding: 8px;
+  background: var(--today);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cal-newbtn:hover { filter: brightness(1.05); }
+/* (0.20.0) .cal-newbtn("+ 새 메모")은 빠른 입력칸으로 대체돼서 지금은 안 쓰임.
+   나중에 다른 곳에서 쓸 수 있어 남겨둠 */
+
+/* ---- 그날 목록 아래 빠른 일정 입력칸 (0.20.0) ----
+   [시각] [제목] [+] 한 줄. 가계부 입력칸(.cal-ledger-input)과 같은 모양으로 맞춤 */
+.cal-quickadd { display: flex; gap: 5px; }
+.cal-quick-time,
+.cal-quick-title {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--paper-line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+}
+/* (0.20.1) 안내문을 '예: 930'으로 바꾸면서 글자가 안 잘리게 폭을 넓힘 */
+.cal-quick-time { flex: 0 0 78px; text-align: center; }
+.cal-quick-title { flex: 1 1 auto; }
+.cal-quick-time:focus,
+.cal-quick-title:focus { outline: 2px solid var(--today); outline-offset: -1px; }
+.cal-quick-add {
+  flex: 0 0 auto;
+  width: 30px;
+  background: var(--today);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.cal-quick-add:hover { filter: brightness(1.05); }
+/* 본문·알람까지 쓰고 싶을 때만 쓰는 길이라 눈에 덜 띄게(글씨 링크 모양) */
+.cal-quick-more {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cal-quick-more:hover { color: var(--ink); text-decoration: underline; }
+
+/* ---- 가계부 모드 ---- */
+/* 상단바 모드 전환 버튼(₩ ↔ 📅) */
+.cal-modebtn {
+  background: transparent;
+  border: none;
+  color: var(--titlebar-ink);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+.cal-modebtn:hover { background: rgba(255, 255, 255, 0.15); }
+.cal-root.locked .cal-modebtn { cursor: default; }
+.cal-root.locked .cal-modebtn:hover { background: transparent; }
+/* 가계부 모드에선 월간 화면만 쓰므로 월/주/일 전환 버튼 숨김 */
+.cal-root.ledger-mode .cal-viewswitch { display: none; }
+/* 📊 통계 버튼: 가계부 모드일 때만 보임(달력 모드에선 숨김) */
+.cal-statsbtn { display: none; }
+.cal-root.ledger-mode .cal-statsbtn { display: inline-block; }
+
+/* 가계부 모드 구분(태훈님 확정 2026-07-24): ①배경에 연한 초록 톤 ②제목 💰가계부(js) ③모드 버튼 강조 */
+.cal-root.ledger-mode {
+  /* 사용자가 고른 배경색(--paper) 위에 초록 톤을 얹음 — 어떤 배경색이어도 구분됨 */
+  background: linear-gradient(rgba(127, 166, 90, 0.12), rgba(127, 166, 90, 0.12)), var(--paper);
+}
+.cal-modebtn.active {
+  background: var(--today);
+  color: #2B2820;
+}
+.cal-modebtn.active:hover { background: var(--today); filter: brightness(1.08); }
+
+/* 날짜 칸의 그날 지출 합계(제일 많이 쓴 분류 색으로 표시) */
+.cal-spend {
+  margin-top: auto;      /* 칸 아래쪽에 붙임 */
+  font-size: 10px;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cal-cell.has-spend { background: rgba(201, 162, 75, 0.06); } /* 지출 있는 칸 은은하게 */
+/* 지난 날 + 지출 있는 칸 — 둘 다 배경을 바꾸므로 섞은 색을 따로 지정(위 "지난 날 구분" 주석 참고) */
+.cal-cell.past.has-spend { background: #EDE7D6; }
+.cal-cell.past.has-spend:hover { background: rgba(201, 162, 75, 0.10); }
+.cal-cell.past .cal-spend { opacity: 0.75; } /* 지난 날도 금액은 잘 보이게(살짝만 흐림) */
+
+/* 가계부 모드: 오른쪽에 주간 합계 열 추가(요일 헤더·그리드 둘 다 8열) */
+.cal-weekdays.ledger-mode,
+.cal-grid.ledger-mode { grid-template-columns: repeat(7, 1fr) minmax(46px, 0.95fr); }
+.cal-weeksum-head { color: var(--ink-soft); }
+.cal-weeksum {
+  border-bottom: 1px solid var(--paper-line);
+  background: rgba(0, 0, 0, 0.025);
+  padding: 3px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;      /* 금액 위, 색막대 아래 */
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cal-weeksum-amt { text-align: right; }
+.cal-weeksum-bar {               /* 분류별 비율 미니 색막대 */
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cal-weeksum-bar div { height: 100%; }
+.cal-weeksum.clickable { cursor: pointer; }
+.cal-weeksum.clickable:hover { background: rgba(0, 0, 0, 0.06); }
+.cal-root.locked .cal-weeksum.clickable { cursor: default; }
+.cal-root.locked .cal-weeksum.clickable:hover { background: rgba(0, 0, 0, 0.025); }
+
+/* 주간 상세 패널의 분류 줄(클릭 대상 아님) + 비율 표시 */
+.cal-week-item { cursor: default; }
+.cal-week-item:hover { background: #fff; }
+.cal-week-pct { flex: 1 1 auto; font-size: 10px; color: var(--ink-soft); }
+.cal-grid.ledger-mode .cal-cell:nth-child(7n) { border-right: 1px solid var(--paper-line); } /* 8열이라 7번째마다 지우던 규칙 되돌림 */
+.cal-grid.ledger-mode .cal-weeksum { border-right: none; }
+
+/* 하단: 이번달 총합 + 분류별 색 막대 + 범례 */
+.cal-ledgerfoot {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--paper-line);
+  padding: 6px 8px;
+}
+.cal-ledger-total {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.cal-ledger-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper-line);
+}
+.cal-ledger-seg { height: 100%; }
+.cal-ledger-legend {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+.cal-ledger-legenditem { display: inline-flex; align-items: center; gap: 3px; }
+.cal-ledger-legenditem .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* 그날 지출 목록 줄 */
+.cal-ledger-item { cursor: pointer; }
+.cal-ledger-item.editing { outline: 2px solid var(--today); }
+.cal-ledger-catname { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--ink); }
+.cal-ledger-memo {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-ledger-amt { flex: 0 0 auto; margin-left: auto; font-size: 12px; font-weight: 600; }
+.cal-ledger-del {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.cal-ledger-del:hover { background: rgba(214, 90, 90, 0.15); color: var(--sun); }
+.cal-ledger-daytotal {
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px 0;
+}
+
+/* 지출 입력칸 */
+.cal-ledger-form { display: flex; flex-direction: column; gap: 5px; }
+.cal-ledger-formrow { display: flex; gap: 5px; }
+.cal-ledger-select,
+.cal-ledger-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--paper-line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+}
+.cal-ledger-select { flex: 0 0 40%; }
+.cal-ledger-save { flex: 0 0 auto; width: auto; padding: 6px 14px; }
+.cal-ledger-cancel {
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+/* ---- 달력 ⚙️ 설정 패널 ---- */
+.cal-set-h {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 10px 2px 4px;
+}
+.cal-set-h:first-child { margin-top: 2px; }
+.cal-set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.cal-set-label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.cal-set-hint { font-size: 10px; color: var(--ink-soft); margin: 0 2px 4px; }
+.cal-set-opval { width: 38px; text-align: right; font-size: 11px; color: var(--ink-soft); }
+.cal-set-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--paper-line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+}
+.cal-set-del {
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.cal-set-del:hover { background: rgba(214, 90, 90, 0.15); color: var(--sun); }
+.cal-set-addcat { margin-top: 6px; }
+/* 가계부 설정: 숫자 입력칸(월급날·고정지출 날짜)과 금액 입력칸 */
+.cal-set-num {
+  width: 44px;
+  padding: 4px 6px;
+  border: 1px solid var(--paper-line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: center;
+}
+.cal-set-money {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--paper-line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+}
+/* 고정 지출 한 건(두 줄 묶음) */
+.cal-set-fixed {
+  border: 1px solid var(--paper-line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: 4px 0;
+}
+
+/* 하단 총합의 예산 대비 % — 초과하면 빨강 */
+.cal-ledger-budget { font-weight: 600; color: var(--ink-soft); }
+.cal-ledger-budget.over { color: #D65A5A; }
+
+/* ---- 📊 가계부 통계 보드 ---- */
+/* 1) 월별 지출 추이: div 막대(차트 라이브러리 없음) */
+.cal-stats-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 4px 2px 2px;
+}
+.cal-stats-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.cal-stats-amt {
+  font-size: 9px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  height: 12px;
+}
+.cal-stats-barbox {
+  width: 60%;
+  height: 60px;
+  display: flex;
+  align-items: flex-end;
+  background: var(--paper-line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cal-stats-bar {
+  width: 100%;
+  min-height: 2px;
+  background: var(--today);
+  border-radius: 3px 3px 0 0;
+}
+.cal-stats-lbl {
+  font-size: 10px;
+  color: var(--ink-soft);
+  margin-top: 3px;
+}
+/* 지금 보고 있는 사이클(마지막 칸)을 굵게 강조 */
+.cal-stats-col.current .cal-stats-lbl { font-weight: 700; color: var(--ink); }
+
+/* 3) 지난 사이클 대비 증감 한 줄 */
+.cal-stats-diffline {
+  font-size: 12px;
+  color: var(--ink);
+  padding: 2px 2px 8px;
+  line-height: 1.6;
+}
+.cal-stats-diff.up { color: var(--sun); font-weight: 700; }
+.cal-stats-diff.down { color: var(--good); font-weight: 700; }
+
+/* ---- 위트 멘트 토스트(말풍선) ---- */
+.cal-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%) translateY(8px);
+  max-width: 86%;
+  background: rgba(43, 40, 32, 0.92);
+  color: #FFF8E7;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 14px;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none; /* 달력 클릭을 막지 않음 */
+  z-index: 30;          /* 지출 입력 패널 위에도 보이게 */
+  text-align: center;
+}
+.cal-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---- 주제 선택 작은 창 ---- */
+.cal-picker {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.cal-picker-box {
+  width: 82%;
+  max-height: 80%;
+  overflow-y: auto;
+  background: var(--paper);
+  border-radius: 8px;
+  padding: 10px;
+}
+.cal-picker-box h3 { font-size: 13px; margin-bottom: 8px; text-align: center; color: var(--ink); }
+.cal-topicbtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 5px;
+  background: #fff;
+  border: 1px solid var(--paper-line);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.cal-topicbtn:hover { background: #FBF9F3; }
+.cal-topicbtn .dot { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
+.cal-picker-cancel {
+  width: 100%;
+  padding: 7px;
+  margin-top: 3px;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+}

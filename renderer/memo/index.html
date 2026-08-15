@@ -14,6 +14,7 @@
         <button id="btnNewMemo" class="icon-btn">＋</button>
         <input type="color" id="colorPicker" class="color-input" />
         <button id="btnPin" class="icon-btn pin-btn"></button>
+        <button id="btnCalendarToggle" class="icon-btn calendar-toggle-btn">📅</button>
         <button id="btnKeepToggle" class="status-dot-btn md-feature"></button>
         <button id="btnDelete" class="icon-btn">🗑</button>
       </div>
@@ -23,17 +24,61 @@
       </div>
     </div>
 
-    <div class="checklist-area" id="checklistArea" hidden>
-      <div class="checklist-list" id="checklistList"></div>
-      <div class="checklist-actions">
-        <button type="button" id="btnChecklistAdd" class="checklist-add-btn"></button>
-        <button type="button" id="btnChecklistRevertAll" class="checklist-revert-btn"></button>
+    <div class="schedule-area" id="scheduleArea" hidden>
+      <span class="schedule-label" id="scheduleLabel"></span>
+      <input type="text" id="scheduleText" class="schedule-text" inputmode="numeric" />
+      <input type="datetime-local" id="scheduleInput" class="schedule-input" title="달력에서 고르기" />
+      <button type="button" id="btnScheduleClear" class="schedule-clear-btn">✕</button>
+      <button type="button" id="btnAlarmToggle" class="schedule-alarm-btn">🔔</button>
+    </div>
+
+    <div class="alarm-area" id="alarmArea" hidden>
+      <label class="alarm-row alarm-enable-row">
+        <input type="checkbox" id="alarmEnabled" />
+        <span id="alarmEnableLabel"></span>
+        <span class="alarm-hint" id="alarmEnableHint"></span>
+      </label>
+      <div class="alarm-detail" id="alarmDetail">
+        <div class="alarm-row">
+          <span class="alarm-field-label" id="alarmBeforeLabel"></span>
+          <input type="number" id="alarmDays" class="alarm-num" min="0" max="3650" />
+          <span class="alarm-unit" id="alarmDaysUnit"></span>
+          <input type="number" id="alarmHours" class="alarm-num" min="0" max="23" />
+          <span class="alarm-unit" id="alarmHoursUnit"></span>
+          <input type="number" id="alarmMinutes" class="alarm-num" min="0" max="59" />
+          <span class="alarm-unit" id="alarmMinutesUnit"></span>
+        </div>
+        <div class="alarm-row">
+          <span class="alarm-field-label" id="alarmRepeatLabel"></span>
+          <select id="alarmRepeat" class="alarm-select">
+            <option value="none" id="alarmRepeatNone"></option>
+            <option value="daily" id="alarmRepeatDaily"></option>
+            <option value="weekly" id="alarmRepeatWeekly"></option>
+            <option value="monthly" id="alarmRepeatMonthly"></option>
+            <option value="yearly" id="alarmRepeatYearly"></option>
+          </select>
+        </div>
+        <div class="alarm-row">
+          <span class="alarm-field-label" id="alarmMethodLabel"></span>
+          <label class="alarm-method"><input type="checkbox" id="alarmNotify" /> <span id="alarmNotifyLabel"></span></label>
+          <label class="alarm-method"><input type="checkbox" id="alarmSound" /> <span id="alarmSoundLabel"></span></label>
+          <label class="alarm-method"><input type="checkbox" id="alarmPopup" /> <span id="alarmPopupLabel"></span></label>
+        </div>
       </div>
     </div>
 
+    <!-- (1.19.0 / 위지윅 2-1단계) 별도 체크리스트 영역 제거 — 체크리스트는 이제 본문 안에
+         "- [ ] 할일" 줄로 들어가고 진짜 체크박스로 그려짐(mdeditor.js 참고) -->
+
+    <!-- (0.19.1 / 위지윅 2-2단계) 별도 표 영역 제거 — 표도 이제 본문 안에
+         "| 가 | 나 |" 줄로 들어가고 진짜 표 모양으로 그려짐(mdeditor.js 참고) -->
+
     <div class="editor-area" id="editorArea">
-      <textarea id="content" spellcheck="false"></textarea>
-      <div class="canvas-layer" id="canvasLayer"></div>
+      <!-- (1.18.0) textarea → contenteditable: 서식이 쓰는 즉시 보이게 하기 위함.
+           저장되는 값은 예전 그대로 마크다운 원문 문자열. mdeditor.js 참고 -->
+      <!-- (0.19.2) 이미지도 본문 안으로 들어옴. 예전엔 여기 canvas-layer가 있어서 이미지가
+           본문 위에 절대좌표로 떠 있었지만, 이제는 본문의 "![[그림.png|400]]" 한 줄임 -->
+      <div id="content" class="content-editor" contenteditable="true" spellcheck="false"></div>
     </div>
 
     <div class="attachment-strip" id="attachmentStrip"></div>
@@ -50,8 +95,14 @@
         <button data-cmd="checklist" id="btnChecklistCmd">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="1.5"/><path d="M4.5 7.5l1.3 1.3L8.5 6"/><line x1="13" y1="7.5" x2="21" y2="7.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><line x1="13" y1="17.5" x2="21" y2="17.5"/></svg>
         </button>
+        <button data-cmd="checklistByLine" id="btnChecklistByLineCmd">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="2.5" width="5" height="5" rx="1"/><line x1="10.5" y1="5" x2="21" y2="5"/><rect x="3" y="9.5" width="5" height="5" rx="1"/><line x1="10.5" y1="12" x2="21" y2="12"/><rect x="3" y="16.5" width="5" height="5" rx="1"/><line x1="10.5" y1="19" x2="21" y2="19"/></svg>
+        </button>
         <button data-cmd="attach" id="btnAttachCmd">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5h7.5L18 9v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M13.5 4.5V9H18"/><path d="M11.5 3.5a1.6 1.6 0 0 0-1.6 1.6V8a1.1 1.1 0 0 0 2.2 0V5.6"/><line x1="7.5" y1="13.5" x2="10.5" y2="13.5"/><line x1="7.5" y1="16.5" x2="13.5" y2="16.5"/><line x1="7.5" y1="19.5" x2="13.5" y2="19.5"/></svg>
+        </button>
+        <button data-cmd="table" id="btnTableCmd" class="md-feature">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="1.5"/><line x1="3" y1="10.5" x2="21" y2="10.5"/><line x1="3" y1="17" x2="21" y2="17"/><line x1="9.5" y1="4" x2="9.5" y2="20"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
         </button>
         <span class="sep" id="specialCharSep" hidden></span>
         <div class="special-char-group" id="specialCharGroup"></div>
@@ -72,7 +123,9 @@
           <button data-cmd="italic" class="md-feature" id="btnItalic"><i>I</i></button>
           <button data-cmd="strike" class="md-feature" id="btnStrike"><s>S</s></button>
           <button data-cmd="underline" class="md-feature" id="btnUnderline"><u>U</u></button>
-          <button data-cmd="highlight" class="md-feature" id="btnHighlight">🖍</button>
+          <span class="hl-wrap md-feature">
+            <button data-cmd="highlight" class="md-feature" id="btnHighlight">🖍</button>
+          </span>
           <button data-cmd="code" class="md-feature" id="btnCode">&lt;/&gt;</button>
           <span class="sep md-feature"></span>
           <button data-cmd="link" class="md-feature" id="btnLink">
@@ -106,6 +159,18 @@
     </div><!-- /bottombar -->
   </div>
 
+  <!-- 형광펜 색 고르기: 툴바(.toolbar)와 하단바(.bottombar)가 둘 다 overflow:hidden 이라
+       그 안에 두면 위로 뜨는 순간 잘려서 안 보였음. 그래서 카드 바깥에 두고 position:fixed로
+       버튼 위치에 맞춰 띄움 (memo.js의 toggleHighlightPalette 참고) -->
+  <div class="hl-palette" id="highlightPalette" hidden>
+    <button type="button" class="hl-swatch" data-hl="" style="background:#FFF3A3"></button>
+    <button type="button" class="hl-swatch" data-hl="#B9F0C9" style="background:#B9F0C9"></button>
+    <button type="button" class="hl-swatch" data-hl="#BBE1FA" style="background:#BBE1FA"></button>
+    <button type="button" class="hl-swatch" data-hl="#FBC4D6" style="background:#FBC4D6"></button>
+    <button type="button" class="hl-swatch" data-hl="#FFD9A8" style="background:#FFD9A8"></button>
+    <button type="button" class="hl-swatch" data-hl="#DCC8F5" style="background:#DCC8F5"></button>
+  </div>
+
   <div class="modal-overlay" id="exportModal" hidden>
     <div class="modal-box">
       <p class="modal-title" id="exportModalTitle"></p>
@@ -124,27 +189,6 @@
       <div class="modal-actions">
         <button id="linkModalCancel" class="modal-btn modal-btn-cancel" type="button"></button>
         <button id="linkModalConfirm" class="modal-btn modal-btn-confirm" type="button"></button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="moveTopicModal" hidden>
-    <div class="modal-box memo-link-box">
-      <p class="modal-title" id="moveTopicModalTitle"></p>
-      <div class="memo-link-list" id="moveTopicList"></div>
-      <div class="modal-actions">
-        <button id="moveTopicModalCancel" class="modal-btn modal-btn-cancel" type="button"></button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="checklistRevertModal" hidden>
-    <div class="modal-box">
-      <p class="modal-title" id="checklistRevertModalTitle"></p>
-      <p class="modal-hint" id="checklistRevertModalHint"></p>
-      <div class="modal-actions">
-        <button id="checklistRevertCancel" class="modal-btn modal-btn-cancel" type="button"></button>
-        <button id="checklistRevertConfirm" class="modal-btn modal-btn-confirm" type="button"></button>
       </div>
     </div>
   </div>
@@ -170,6 +214,45 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="tableModal" hidden>
+    <div class="modal-box table-picker-box">
+      <p class="modal-title" id="tableModalTitle"></p>
+      <p class="modal-hint" id="tableModalHint"></p>
+      <div class="table-grid" id="tableGrid"></div>
+      <p class="table-grid-size" id="tableGridSize"></p>
+      <p class="modal-hint table-modal-paste-hint" id="tableModalPasteHint"></p>
+      <div class="modal-actions">
+        <button id="tableModalPaste" class="modal-btn modal-btn-secondary" type="button"></button>
+        <button id="tableModalCancel" class="modal-btn modal-btn-cancel" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="imageAnnotateModal" hidden>
+    <div class="modal-box image-annotate-box">
+      <div class="image-annotate-toolbar">
+        <button type="button" id="annotateToolLine" class="annotate-tool-btn" data-tool="line"></button>
+        <button type="button" id="annotateToolArrow" class="annotate-tool-btn" data-tool="arrow"></button>
+        <button type="button" id="annotateToolNumber" class="annotate-tool-btn" data-tool="number"></button>
+        <span class="annotate-toolbar-divider"></span>
+        <button type="button" class="annotate-color-swatch" data-color="#ff3b30" style="background:#ff3b30"></button>
+        <button type="button" class="annotate-color-swatch" data-color="#2f6fed" style="background:#2f6fed"></button>
+        <button type="button" class="annotate-color-swatch" data-color="#111111" style="background:#111111"></button>
+        <button type="button" class="annotate-color-swatch" data-color="#f5c518" style="background:#f5c518"></button>
+        <div class="annotate-toolbar-spacer"></div>
+        <button type="button" id="annotateUndo" class="annotate-undo-btn"></button>
+      </div>
+      <div class="image-annotate-canvas-wrap">
+        <canvas id="annotateCanvas" class="image-annotate-canvas"></canvas>
+      </div>
+      <p class="modal-hint" id="imageAnnotateHint"></p>
+      <div class="modal-actions">
+        <button id="imageAnnotateCancel" class="modal-btn modal-btn-cancel" type="button"></button>
+        <button id="imageAnnotateSave" class="modal-btn modal-btn-confirm" type="button"></button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="confirmModal" hidden>
     <div class="modal-box">
       <p class="modal-title" id="confirmModalTitle"></p>
@@ -181,7 +264,9 @@
     </div>
   </div>
 
+  <script src="../common/appFont.js"></script>
   <script src="../lang/ko.js"></script>
+  <script src="mdeditor.js"></script>
   <script src="memo.js"></script>
 </body>
 </html>

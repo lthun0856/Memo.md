@@ -6,7 +6,11 @@ let mdFeatureEnabled = true; // MD/옵시디언 관련 기능(서식버튼, 메�
 let hasSeenImageResizeNotice = false; // 이미지 자동 리사이즈 안내를 이미 봤는지(첫 이미지 삽입 때 한 번만 안내)
 
 const els = {
-  content: document.getElementById('content'),
+  // (1.18.0) 본문은 이제 contenteditable div. createMdEditor가 textarea처럼 쓸 수 있게
+  // 감싸주기 때문에 아래 코드들(.value / .selectionStart / .setRangeText ...)은 그대로 동작함
+  content: createMdEditor(document.getElementById('content')),
+  contentEl: document.getElementById('content'),
+  highlightPalette: document.getElementById('highlightPalette'),
   topicChip: document.getElementById('topicChip'),
   titleInput: document.getElementById('titleInput'),
   statusText: document.getElementById('statusText'),
@@ -19,28 +23,46 @@ const els = {
   btnNewMemo: document.getElementById('btnNewMemo'),
   btnCopy: document.getElementById('btnCopy'),
   btnMoveTopic: document.getElementById('btnMoveTopic'),
-  moveTopicModal: document.getElementById('moveTopicModal'),
-  moveTopicList: document.getElementById('moveTopicList'),
-  moveTopicModalCancel: document.getElementById('moveTopicModalCancel'),
   btnSaveTemplate: document.getElementById('btnSaveTemplate'),
   templateModal: document.getElementById('templateModal'),
   templateTopicList: document.getElementById('templateTopicList'),
   templateModalCancel: document.getElementById('templateModalCancel'),
   btnKeepToggle: document.getElementById('btnKeepToggle'),
   btnPin: document.getElementById('btnPin'),
+  btnCalendarToggle: document.getElementById('btnCalendarToggle'),
+  scheduleArea: document.getElementById('scheduleArea'),
+  scheduleLabel: document.getElementById('scheduleLabel'),
+  scheduleText: document.getElementById('scheduleText'),
+  scheduleInput: document.getElementById('scheduleInput'),
+  btnScheduleClear: document.getElementById('btnScheduleClear'),
+  btnAlarmToggle: document.getElementById('btnAlarmToggle'),
+  alarmArea: document.getElementById('alarmArea'),
+  alarmDetail: document.getElementById('alarmDetail'),
+  alarmEnabled: document.getElementById('alarmEnabled'),
+  alarmEnableLabel: document.getElementById('alarmEnableLabel'),
+  alarmEnableHint: document.getElementById('alarmEnableHint'),
+  alarmBeforeLabel: document.getElementById('alarmBeforeLabel'),
+  alarmDays: document.getElementById('alarmDays'),
+  alarmHours: document.getElementById('alarmHours'),
+  alarmMinutes: document.getElementById('alarmMinutes'),
+  alarmDaysUnit: document.getElementById('alarmDaysUnit'),
+  alarmHoursUnit: document.getElementById('alarmHoursUnit'),
+  alarmMinutesUnit: document.getElementById('alarmMinutesUnit'),
+  alarmRepeatLabel: document.getElementById('alarmRepeatLabel'),
+  alarmRepeat: document.getElementById('alarmRepeat'),
+  alarmMethodLabel: document.getElementById('alarmMethodLabel'),
+  alarmNotify: document.getElementById('alarmNotify'),
+  alarmSound: document.getElementById('alarmSound'),
+  alarmPopup: document.getElementById('alarmPopup'),
+  alarmNotifyLabel: document.getElementById('alarmNotifyLabel'),
+  alarmSoundLabel: document.getElementById('alarmSoundLabel'),
+  alarmPopupLabel: document.getElementById('alarmPopupLabel'),
   colorPicker: document.getElementById('colorPicker'),
   toolbar: document.getElementById('toolbar'),
+  bottombar: document.getElementById('bottombar'),
   headingSelect: document.getElementById('headingSelect'),
   editorArea: document.getElementById('editorArea'),
-  canvasLayer: document.getElementById('canvasLayer'),
   attachmentStrip: document.getElementById('attachmentStrip'),
-  checklistArea: document.getElementById('checklistArea'),
-  checklistList: document.getElementById('checklistList'),
-  btnChecklistAdd: document.getElementById('btnChecklistAdd'),
-  btnChecklistRevertAll: document.getElementById('btnChecklistRevertAll'),
-  checklistRevertModal: document.getElementById('checklistRevertModal'),
-  checklistRevertCancel: document.getElementById('checklistRevertCancel'),
-  checklistRevertConfirm: document.getElementById('checklistRevertConfirm'),
   exportModal: document.getElementById('exportModal'),
   exportFileNameInput: document.getElementById('exportFileNameInput'),
   exportModalCancel: document.getElementById('exportModalCancel'),
@@ -53,11 +75,28 @@ const els = {
   specialCharGroup: document.getElementById('specialCharGroup'),
   imageResizeNoticeModal: document.getElementById('imageResizeNoticeModal'),
   imageResizeNoticeConfirm: document.getElementById('imageResizeNoticeConfirm'),
+  tableModal: document.getElementById('tableModal'),
+  tableModalHint: document.getElementById('tableModalHint'),
+  tableGrid: document.getElementById('tableGrid'),
+  tableGridSize: document.getElementById('tableGridSize'),
+  tableModalPaste: document.getElementById('tableModalPaste'),
+  tableModalPasteHint: document.getElementById('tableModalPasteHint'),
+  tableModalCancel: document.getElementById('tableModalCancel'),
   confirmModal: document.getElementById('confirmModal'),
   confirmModalTitle: document.getElementById('confirmModalTitle'),
   confirmModalHint: document.getElementById('confirmModalHint'),
   confirmModalCancel: document.getElementById('confirmModalCancel'),
-  confirmModalConfirm: document.getElementById('confirmModalConfirm')
+  confirmModalConfirm: document.getElementById('confirmModalConfirm'),
+  imageAnnotateModal: document.getElementById('imageAnnotateModal'),
+  annotateCanvas: document.getElementById('annotateCanvas'),
+  annotateToolLine: document.getElementById('annotateToolLine'),
+  annotateToolArrow: document.getElementById('annotateToolArrow'),
+  annotateToolNumber: document.getElementById('annotateToolNumber'),
+  annotateColorSwatches: document.querySelectorAll('.annotate-color-swatch'),
+  annotateUndo: document.getElementById('annotateUndo'),
+  imageAnnotateHint: document.getElementById('imageAnnotateHint'),
+  imageAnnotateCancel: document.getElementById('imageAnnotateCancel'),
+  imageAnnotateSave: document.getElementById('imageAnnotateSave')
 };
 
 // 문구 안의 {fileName}/{message}/{ch}/{state} 같은 자리표시자를 실제 값으로 바꿔주는 도우미
@@ -73,19 +112,37 @@ function applyLang() {
   els.btnNewMemo.title = M.newMemoTitle;
   els.colorPicker.title = M.colorPickerTitle;
   els.btnPin.title = M.pinTitle;
+  els.btnCalendarToggle.title = M.calendarToggleTitle;
+  els.scheduleLabel.textContent = M.scheduleLabel;
+  els.scheduleText.placeholder = M.scheduleTextPlaceholder;
+  els.btnScheduleClear.title = M.scheduleClearTitle;
+  els.btnAlarmToggle.title = M.alarmToggleTitle;
+  els.alarmEnableLabel.textContent = M.alarmEnableLabel;
+  els.alarmEnableHint.textContent = M.alarmEnableHint;
+  els.alarmBeforeLabel.textContent = M.alarmBeforeLabel;
+  els.alarmDaysUnit.textContent = M.alarmDaysUnit;
+  els.alarmHoursUnit.textContent = M.alarmHoursUnit;
+  els.alarmMinutesUnit.textContent = M.alarmMinutesUnit;
+  els.alarmRepeatLabel.textContent = M.alarmRepeatLabel;
+  document.getElementById('alarmRepeatNone').textContent = M.alarmRepeatNone;
+  document.getElementById('alarmRepeatDaily').textContent = M.alarmRepeatDaily;
+  document.getElementById('alarmRepeatWeekly').textContent = M.alarmRepeatWeekly;
+  document.getElementById('alarmRepeatMonthly').textContent = M.alarmRepeatMonthly;
+  document.getElementById('alarmRepeatYearly').textContent = M.alarmRepeatYearly;
+  els.alarmMethodLabel.textContent = M.alarmMethodLabel;
+  els.alarmNotifyLabel.textContent = M.alarmMethodNotify;
+  els.alarmSoundLabel.textContent = M.alarmMethodSound;
+  els.alarmPopupLabel.textContent = M.alarmMethodPopup;
   els.btnKeepToggle.title = M.keepToggleBaseTitle;
   els.btnDelete.title = M.deleteTitle;
   els.btnClose.title = M.closeTitle;
-
-  els.btnChecklistAdd.textContent = M.checklistAddButton;
-  els.btnChecklistRevertAll.textContent = M.checklistRevertButton;
-  els.btnChecklistRevertAll.title = M.checklistRevertButtonTitle;
 
   els.content.placeholder = M.contentPlaceholder;
 
   document.getElementById('btnUndo').title = M.undoTitle;
   document.getElementById('btnRedo').title = M.redoTitle;
   document.getElementById('btnChecklistCmd').title = M.checklistCmdTitle;
+  document.getElementById('btnChecklistByLineCmd').title = M.checklistByLineCmdTitle;
   document.getElementById('btnAttachCmd').title = M.attachTitle;
 
   document.getElementById('optHeadingNormal').textContent = M.headingNormal;
@@ -99,6 +156,11 @@ function applyLang() {
   document.getElementById('btnStrike').title = M.strikeTitle;
   document.getElementById('btnUnderline').title = M.underlineTitle;
   document.getElementById('btnHighlight').title = M.highlightTitle;
+  if (els.highlightPalette && M.highlightColorTitles) {
+    els.highlightPalette.querySelectorAll('.hl-swatch').forEach((btn, i) => {
+      btn.title = M.highlightColorTitles[i] || '';
+    });
+  }
   document.getElementById('btnCode').title = M.codeTitle;
   document.getElementById('btnLink').title = M.linkTitle;
   document.getElementById('btnSup').title = M.supTitle;
@@ -111,7 +173,7 @@ function applyLang() {
   els.btnExportTxt.title = M.exportTxtTitle;
   document.getElementById('btnMemoLink').title = M.memoLinkTitle;
   els.btnExport.title = M.exportButtonText;
-  document.getElementById('btnExportLabel').textContent = M.exportButtonText;
+  document.getElementById('btnExportLabel').textContent = M.exportButtonShortLabel;
 
   document.getElementById('exportModalTitle').textContent = M.exportModalTitle;
   els.exportModalCancel.textContent = M.common.cancel;
@@ -121,14 +183,6 @@ function applyLang() {
   els.linkModalCancel.textContent = M.common.cancel;
   els.linkModalConfirm.textContent = M.common.confirm;
 
-  document.getElementById('moveTopicModalTitle').textContent = M.moveTopicModalTitle;
-  els.moveTopicModalCancel.textContent = M.common.cancel;
-
-  document.getElementById('checklistRevertModalTitle').textContent = M.checklistRevertModalTitle;
-  document.getElementById('checklistRevertModalHint').textContent = M.checklistRevertModalHint;
-  els.checklistRevertCancel.textContent = M.common.cancel;
-  els.checklistRevertConfirm.textContent = M.checklistRevertConfirmButton;
-
   document.getElementById('templateModalTitle').textContent = M.templateModalTitle;
   document.getElementById('templateModalHint').textContent = M.templateModalHint;
   els.templateModalCancel.textContent = M.common.cancel;
@@ -136,6 +190,21 @@ function applyLang() {
   document.getElementById('imageResizeNoticeTitle').textContent = M.imageResizeNoticeTitle;
   document.getElementById('imageResizeNoticeHint').textContent = M.imageResizeNoticeHint;
   els.imageResizeNoticeConfirm.textContent = M.common.confirm;
+
+  document.getElementById('tableModalTitle').textContent = M.tableModalTitle;
+  els.tableModalHint.textContent = M.tableModalHint;
+  els.tableModalPasteHint.textContent = M.tableModalPasteHint;
+  els.tableModalPaste.textContent = M.tableModalPasteButton;
+  els.tableModalCancel.textContent = M.common.cancel;
+
+  els.annotateToolLine.textContent = M.imageAnnotateToolLine;
+  els.annotateToolArrow.textContent = M.imageAnnotateToolArrow;
+  els.annotateToolNumber.textContent = M.imageAnnotateToolNumber;
+  els.annotateColorSwatches.forEach((btn) => (btn.title = M.imageAnnotateColorTitle));
+  els.annotateUndo.textContent = M.imageAnnotateUndoButton;
+  els.imageAnnotateHint.textContent = M.imageAnnotateHint;
+  els.imageAnnotateCancel.textContent = M.common.cancel;
+  els.imageAnnotateSave.textContent = M.imageAnnotateSaveButton;
 
   els.confirmModalCancel.textContent = M.common.cancel;
   els.confirmModalConfirm.textContent = M.common.confirm;
@@ -146,7 +215,7 @@ let pendingLinkRange = null;
 
 let locked = false;
 
-// 체크리스트 "본문으로 되돌리기" 때(아래 doRevertChecklistToText 참고) 겪었던 것과 같은 이유로,
+// 체크리스트 "본문으로 되돌리기"(1.19.0에서 없어짐) 때 겪었던 것과 같은 이유로,
 // confirm()을 아예 안 쓰고 이 메모창 전용 자체 확인 모달을 씀(설정창/위젯의 openConfirmModal과
 // 같은 패턴). 확인을 누르면 onConfirm을 실행함
 let pendingConfirmAction = null;
@@ -189,6 +258,10 @@ window.api.onMemoInit(async (initMemo) => {
   memo = initMemo;
   if (!memo.attachments) memo.attachments = [];
   if (!memo.checklist) memo.checklist = [];
+  if (!memo.tables) memo.tables = [];
+  if (typeof memo.useCalendar !== 'boolean') memo.useCalendar = false;
+  if (memo.scheduleAt === undefined) memo.scheduleAt = null;
+  memo.alarm = normalizeAlarmLocal(memo.alarm);
   els.content.value = memo.content || '';
   applyAccentColor(memo.color || '#C9A24B');
   els.colorPicker.value = memo.color || '#C9A24B';
@@ -205,8 +278,9 @@ window.api.onMemoInit(async (initMemo) => {
   renderTopicChip();
   renderKeepToggle();
   renderPinButton();
+  renderScheduleArea();
+  renderAlarmArea();
   renderAttachments();
-  renderChecklist();
   applyCollapsedState(!!memo.collapsed);
 
   exportUpToDate = !!(
@@ -217,8 +291,9 @@ window.api.onMemoInit(async (initMemo) => {
   );
   renderExportButtonState();
 
-  if (memo.title) {
-    // 제목이 이미 있는 주제(기본 제목 등)는 기존처럼 본문에 바로 커서
+  if (memo.title || memo.skipTitleFirst) {
+    // 제목이 이미 있거나(기본 제목 등), 주제에서 "제목 먼저 쓰지 않기"를 켜둔 경우엔
+    // 기존처럼 본문에 바로 커서
     els.content.focus();
   } else {
     // 제목이 비어있으면 제목칸에 커서를 먼저 줘서 바로 입력할 수 있게 함
@@ -412,13 +487,197 @@ els.colorPicker.addEventListener('input', async () => {
   await window.api.setMemoColor(memo.id, memo.color);
 });
 
+// ---- 일정 날짜(달력) ----
+// memo.useCalendar가 켜져 있을 때만 제목줄 아래 일정 날짜 칸을 보여줌.
+// 저장값(memo.scheduleAt)은 "YYYY-MM-DDTHH:mm"(로컬 시각). 숫자칸으로 빠르게 치거나 달력으로 고를 수 있음.
+
+// 숫자만 뽑아 일정 문자열로 변환. 자리수로 형식을 판단:
+//  6=YYMMDD, 8=YYYYMMDD (둘 다 시간 00:00), 10=YYMMDDHHmm, 12=YYYYMMDDHHmm.
+//  2자리 연도는 20YY로 봄. 실제로 없는 날짜(예: 2월30일, 13월)면 null 반환.
+function parseScheduleDigits(raw) {
+  const d = (raw || '').replace(/[^0-9]/g, '');
+  let y, mo, da, hh = '00', mi = '00';
+  if (d.length === 6) { y = '20' + d.slice(0, 2); mo = d.slice(2, 4); da = d.slice(4, 6); }
+  else if (d.length === 8) { y = d.slice(0, 4); mo = d.slice(4, 6); da = d.slice(6, 8); }
+  else if (d.length === 10) { y = '20' + d.slice(0, 2); mo = d.slice(2, 4); da = d.slice(4, 6); hh = d.slice(6, 8); mi = d.slice(8, 10); }
+  else if (d.length === 12) { y = d.slice(0, 4); mo = d.slice(4, 6); da = d.slice(6, 8); hh = d.slice(8, 10); mi = d.slice(10, 12); }
+  else return null;
+  const Y = +y, Mo = +mo, Da = +da, H = +hh, Mi = +mi;
+  if (Mo < 1 || Mo > 12 || Da < 1 || Da > 31 || H > 23 || Mi > 59) return null;
+  const dt = new Date(Y, Mo - 1, Da, H, Mi);
+  if (dt.getFullYear() !== Y || dt.getMonth() !== Mo - 1 || dt.getDate() !== Da) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${Y}-${p(Mo)}-${p(Da)}T${p(H)}:${p(Mi)}`;
+}
+
+// 저장값("...T...")을 사람이 읽는 표시("YYYY-MM-DD HH:mm")로
+function formatScheduleDisplay(val) {
+  return val ? val.replace('T', ' ') : '';
+}
+
+function renderScheduleArea() {
+  const on = !!memo.useCalendar;
+  els.scheduleArea.hidden = !on;
+  els.btnCalendarToggle.classList.toggle('active', on);
+  els.scheduleInput.value = memo.scheduleAt || '';
+  els.scheduleText.value = formatScheduleDisplay(memo.scheduleAt);
+  els.scheduleText.classList.remove('invalid');
+}
+
+async function saveScheduleAt(value) {
+  memo.scheduleAt = value || null;
+  els.scheduleInput.value = memo.scheduleAt || '';
+  els.scheduleText.value = formatScheduleDisplay(memo.scheduleAt);
+  await window.api.setMemoScheduleAt(memo.id, memo.scheduleAt);
+}
+
+// 달력 토글: 이 메모에서 일정 날짜 기능 켜기/끄기 (끈다고 이미 넣은 날짜를 지우지는 않음)
+els.btnCalendarToggle.addEventListener('click', async () => {
+  memo.useCalendar = !memo.useCalendar;
+  if (!memo.useCalendar) alarmPanelOpen = false; // 달력 끄면 알람칸도 접음
+  renderScheduleArea();
+  renderAlarmArea();
+  await window.api.setMemoUseCalendar(memo.id, memo.useCalendar);
+});
+
+// 숫자칸에서 값을 확정(엔터 또는 칸 밖 클릭)했을 때: 비면 지움, 올바르면 저장, 틀리면 빨갛게
+async function commitScheduleText() {
+  const raw = els.scheduleText.value.trim();
+  if (!raw) { els.scheduleText.classList.remove('invalid'); await saveScheduleAt(null); return; }
+  const parsed = parseScheduleDigits(raw);
+  if (!parsed) { els.scheduleText.classList.add('invalid'); return; }
+  els.scheduleText.classList.remove('invalid');
+  await saveScheduleAt(parsed);
+}
+els.scheduleText.addEventListener('change', commitScheduleText);
+els.scheduleText.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); els.scheduleText.blur(); }
+});
+// 다시 입력하려고 고칠 때 빨간 표시는 즉시 지워줌
+els.scheduleText.addEventListener('input', () => els.scheduleText.classList.remove('invalid'));
+
+// 달력에서 고르면 숫자칸에도 같은 값이 반영됨
+els.scheduleInput.addEventListener('change', async () => {
+  await saveScheduleAt(els.scheduleInput.value || null);
+});
+
+// ✕ 버튼: 일정 날짜만 지움(달력 기능 자체는 켜둔 채)
+els.btnScheduleClear.addEventListener('click', async () => {
+  els.scheduleText.classList.remove('invalid');
+  await saveScheduleAt(null);
+});
+
+// ---- 알람 ----
+// 일정 날짜(memo.scheduleAt)에 맞춰 알람을 울림. 실제 울리는 건 메인 프로세스가 담당하고,
+// 여기서는 설정 UI만 그림. 🔔 버튼으로 설정칸을 펼쳤다 접음.
+let alarmPanelOpen = false;
+
+// 저장값이 없거나 옛 메모라도 항상 온전한 알람 객체를 갖도록 기본값으로 채움(방어)
+function normalizeAlarmLocal(a) {
+  a = a || {};
+  const b = a.before || {};
+  const num = (v, d) => (Number.isFinite(+v) ? Math.max(0, Math.floor(+v)) : d);
+  const repeats = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
+  let methods = Array.isArray(a.methods)
+    ? a.methods.filter((m) => ['notify', 'sound', 'popup'].includes(m))
+    : null;
+  if (methods === null) methods = ['notify', 'sound']; // 옛 메모 기본값
+  return {
+    enabled: !!a.enabled,
+    before: { days: num(b.days, 0), hours: num(b.hours, 0), minutes: num(b.minutes, 0) },
+    repeat: repeats.includes(a.repeat) ? a.repeat : 'none',
+    methods,
+    firedFor: a.firedFor || null
+  };
+}
+
+// UI에 현재 memo.alarm 값을 반영
+function renderAlarmArea() {
+  const al = memo.alarm || (memo.alarm = normalizeAlarmLocal(null));
+  // 🔔 버튼: 알람이 켜져 있으면 색으로 표시, 패널이 열려 있으면 눌린 표시
+  els.btnAlarmToggle.classList.toggle('on', !!al.enabled);
+  els.btnAlarmToggle.classList.toggle('active', alarmPanelOpen);
+  // 일정 날짜 기능이 꺼져 있으면(schedule-area 숨김) 알람칸도 같이 숨김
+  els.alarmArea.hidden = !(alarmPanelOpen && memo.useCalendar);
+
+  els.alarmEnabled.checked = !!al.enabled;
+  // 일정 날짜가 아직 없으면 안내문구를 보여줌(알람은 켜둘 수 있지만 날짜를 정해야 울림)
+  els.alarmEnableHint.hidden = !!memo.scheduleAt;
+
+  els.alarmDays.value = al.before.days || 0;
+  els.alarmHours.value = al.before.hours || 0;
+  els.alarmMinutes.value = al.before.minutes || 0;
+  els.alarmRepeat.value = al.repeat || 'none';
+  els.alarmNotify.checked = al.methods.includes('notify');
+  els.alarmSound.checked = al.methods.includes('sound');
+  els.alarmPopup.checked = al.methods.includes('popup');
+
+  // 알람이 꺼져 있으면 세부 설정은 흐리게(못 누르게)
+  els.alarmDetail.classList.toggle('disabled', !al.enabled);
+}
+
+// 현재 UI 입력값을 모아 memo.alarm으로 만들고 저장
+async function saveAlarm() {
+  const clampInt = (el, hi) => {
+    let v = Math.floor(+el.value || 0);
+    if (v < 0) v = 0;
+    if (v > hi) v = hi;
+    el.value = v;
+    return v;
+  };
+  const methods = [];
+  if (els.alarmNotify.checked) methods.push('notify');
+  if (els.alarmSound.checked) methods.push('sound');
+  if (els.alarmPopup.checked) methods.push('popup');
+  memo.alarm = {
+    enabled: els.alarmEnabled.checked,
+    before: {
+      days: clampInt(els.alarmDays, 3650),
+      hours: clampInt(els.alarmHours, 23),
+      minutes: clampInt(els.alarmMinutes, 59)
+    },
+    repeat: els.alarmRepeat.value || 'none',
+    methods,
+    firedFor: memo.alarm ? memo.alarm.firedFor : null
+  };
+  els.alarmDetail.classList.toggle('disabled', !memo.alarm.enabled);
+  els.btnAlarmToggle.classList.toggle('on', !!memo.alarm.enabled);
+  // 메인 프로세스가 firedFor를 재기준해서 돌려주므로 그 값으로 갱신
+  const saved = await window.api.setMemoAlarm(memo.id, memo.alarm);
+  if (saved && saved.alarm) memo.alarm = saved.alarm;
+}
+
+// 🔔 버튼: 알람 설정칸 펼치기/접기
+els.btnAlarmToggle.addEventListener('click', () => {
+  alarmPanelOpen = !alarmPanelOpen;
+  renderAlarmArea();
+});
+
+// 알람 켜기/끄기
+els.alarmEnabled.addEventListener('change', saveAlarm);
+// 미리 알림 숫자칸(값 확정 시 저장)
+[els.alarmDays, els.alarmHours, els.alarmMinutes].forEach((el) => {
+  el.addEventListener('change', saveAlarm);
+});
+// 반복/방식
+els.alarmRepeat.addEventListener('change', saveAlarm);
+[els.alarmNotify, els.alarmSound, els.alarmPopup].forEach((el) => {
+  el.addEventListener('change', saveAlarm);
+});
+
 // ---- 자동 저장 ----
 
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
+    // (1.18.0 방어코드) 본문 편집기가 어떤 이유로든 통째로 비어버린(줄이 하나도 없는)
+    // 비정상 상태면 저장을 건너뜀 — 그대로 저장하면 메모 내용이 통째로 날아감.
+    // 사용자가 직접 다 지운 경우는 빈 줄이 하나 남아 있으므로 정상 저장됨
+    const broken = els.contentEl.childNodes.length === 0 && (memo.content || '').length > 0;
+    if (broken) return;
     memo.content = els.content.value;
     await window.api.updateMemoContent(memo.id, memo.content);
+    await pruneUnusedImages();
     // 자동저장 표시(문구 깜빡임)는 끔 — 저장 자체는 계속 조용히 동작함
   }, 500);
 }
@@ -441,6 +700,23 @@ function blobToBase64(blob) {
 
 els.content.addEventListener('paste', async (e) => {
   if (locked) return;
+
+  // 클립보드에 진짜 표(HTML table)가 들어있으면 본문에 글자로 붙이지 않고 새 표로 만듦.
+  // ("표 복사" 버튼·엑셀·다른 메모에서 온 경우만 해당. 일반 글자는 그대로 기본 붙여넣기)
+  // getData는 await보다 먼저 동기로 읽어야 함 — await 뒤에는 clipboardData가 비워질 수 있음.
+  const pasteHtml = e.clipboardData ? e.clipboardData.getData('text/html') : '';
+  if (pasteHtml && /<table/i.test(pasteHtml)) {
+    const pasteText = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+    const rows = parseClipboardTable(pasteHtml, pasteText);
+    if (rows) {
+      e.preventDefault();
+      els.content.insertTable(0, 0, rows);
+      scheduleSave();
+      updateTableBar();
+      return;
+    }
+  }
+
   const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
   const imageItem = items.find((it) => it.type && it.type.startsWith('image/'));
   if (!imageItem) return; // 이미지가 아니면 기본 붙여넣기 동작 그대로 둠
@@ -454,7 +730,8 @@ els.content.addEventListener('paste', async (e) => {
   await window.api.addAttachment(memo.id, attachment);
   memo.attachments.push(attachment);
   markExportDirty();
-  renderAttachments();
+  await renderAttachments();
+  insertImageAtCursor(attachment);
   maybeShowImageResizeNotice();
 });
 
@@ -480,7 +757,8 @@ els.editorArea.addEventListener('drop', async (e) => {
     memo.attachments.push(file);
   }
   markExportDirty();
-  renderAttachments();
+  await renderAttachments();
+  added.forEach((file) => { if (file.isImage) insertImageAtCursor(file); });
   if (added.some((file) => file.isImage)) maybeShowImageResizeNotice();
 });
 
@@ -544,11 +822,15 @@ function prefixLines(prefix) {
 
 function runToolbarCommand(cmd) {
   switch (cmd) {
+    // (1.18.0) 본문이 contenteditable로 바뀌면서 브라우저 기본 실행취소를 못 쓰게 됐음
+    // (다시 그릴 때마다 기록이 끊김) → mdeditor.js의 자체 실행취소를 사용
     case 'undo':
-      document.execCommand('undo');
+      els.content.focus();
+      els.content.undo();
       break;
     case 'redo':
-      document.execCommand('redo');
+      els.content.focus();
+      els.content.redo();
       break;
     case 'list':
       prefixLines('- ');
@@ -569,7 +851,7 @@ function runToolbarCommand(cmd) {
       wrapSelection('<u>', '</u>');
       break;
     case 'highlight':
-      wrapSelection('==', '==');
+      toggleHighlightPalette();
       break;
     case 'code': {
       const hasNewline = els.content.value
@@ -600,8 +882,14 @@ function runToolbarCommand(cmd) {
     case 'checklist':
       convertSelectionToChecklist();
       break;
+    case 'checklistByLine':
+      convertSelectionToChecklistByLine();
+      break;
     case 'attach':
       handleAttach();
+      break;
+    case 'table':
+      openTableModal();
       break;
   }
 }
@@ -613,97 +901,151 @@ document.body.addEventListener('click', (e) => {
   if (btn) runToolbarCommand(btn.dataset.cmd);
 });
 
+// (1.18.0) 본문이 contenteditable이 되면서, 툴바 버튼을 누르는 순간 본문에서 포커스가
+// 빠져나가 선택 영역이 풀려버리는 문제가 생김. 버튼 누를 때의 기본 포커스 이동만 막아서
+// 선택한 글자가 그대로 남아 있게 함(버튼 클릭 자체는 정상 동작)
+els.bottombar.addEventListener('mousedown', (e) => {
+  if (e.target.closest('button')) e.preventDefault();
+});
+
+// ---- 형광펜 색 고르기 ----
+// 노랑은 마크다운 표준(==강조==), 나머지 색은 표준 문법이 없어서 <mark style> HTML로 넣음
+// (태훈님 확정 2026-08-14: md 파일이 조금 지저분해지더라도 여러 색을 쓰기로 함)
+
+function toggleHighlightPalette() {
+  const palette = els.highlightPalette;
+  if (!palette) return;
+  if (!palette.hidden) { palette.hidden = true; return; }
+  if (locked) return;
+
+  // 카드 바깥(position:fixed)에 있으므로 🖍 버튼 위치를 재서 그 바로 위에 띄움.
+  // 창 밖으로 넘치면 좌우로 밀어 넣고, 위쪽 공간이 모자라면 버튼 아래로 내림
+  const btn = document.getElementById('btnHighlight');
+  palette.hidden = false;
+  if (!btn) return;
+  const b = btn.getBoundingClientRect();
+  const p = palette.getBoundingClientRect();
+  let left = b.left + b.width / 2 - p.width / 2;
+  left = Math.max(6, Math.min(left, window.innerWidth - p.width - 6));
+  let top = b.top - p.height - 6;
+  if (top < 6) top = b.bottom + 6;
+  palette.style.left = `${Math.round(left)}px`;
+  palette.style.top = `${Math.round(top)}px`;
+}
+
+function closeHighlightPalette() {
+  if (els.highlightPalette) els.highlightPalette.hidden = true;
+}
+
+if (els.highlightPalette) {
+  // 하단바 버튼과 같은 이유(선택 영역이 풀리지 않게) — 색을 누를 때 포커스 이동만 막음
+  els.highlightPalette.addEventListener('mousedown', (e) => e.preventDefault());
+  els.highlightPalette.addEventListener('click', (e) => {
+    const swatch = e.target.closest('.hl-swatch');
+    if (!swatch) return;
+    const color = swatch.dataset.hl || '';
+    closeHighlightPalette();
+    els.content.focus();
+    if (!color) toggleWrapSelection('==');
+    else wrapSelection(`<mark style="background:${color}">`, '</mark>');
+  });
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.hl-wrap') || e.target.closest('.hl-palette')) return;
+    closeHighlightPalette();
+  });
+}
+
+// 워드처럼 Ctrl+B / Ctrl+I / Ctrl+U 로도 서식을 걸 수 있게 함
+// (contenteditable의 브라우저 기본 동작은 <b> 태그를 심어버려서 mdeditor.js에서 막아뒀음)
+els.content.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+  const key = String(e.key).toLowerCase();
+  if (key === 'b') runToolbarCommand('bold');
+  else if (key === 'i') runToolbarCommand('italic');
+  else if (key === 'u') runToolbarCommand('underline');
+});
+
 els.headingSelect.addEventListener('change', () => {
   if (els.headingSelect.value) prefixLines(els.headingSelect.value);
   els.headingSelect.value = '';
 });
 
 // ---- 체크리스트 ----
-// textarea는 순수 텍스트라 그 안에서는 실제 체크박스나 부분 취소선을 표시할 수 없어서,
-// 이미지 첨부와 같은 방식으로 본문과는 별도인 목록(memo.checklist)으로 관리함.
-// MD내보내기/txt저장/복사할 때만 "- [ ] 텍스트" 형식의 마크다운으로 합쳐짐(exporter.js 참고)
+// (1.19.0 / 위지윅 2-1단계) 예전엔 textarea 안에 체크박스를 그릴 수 없어서 본문과 별개인
+// 목록(memo.checklist)으로 관리했음. 이제 본문이 실시간 서식 편집기라 "- [ ] 할일" 줄을
+// 본문 안에 그대로 두고 진짜 체크박스로 그린다(mdeditor.js 참고).
+// 그래서 여기 있던 별도 목록 관련 코드는 전부 사라졌고, 툴바 버튼은 선택한 줄 앞에
+// "- [ ] "를 붙였다 떼는 역할만 함.
 
-// 선택한 범위(선택 없으면 메모 전체)를 체크리스트 항목으로 옮기고, 그 부분은 본문에서 제거함.
-// 문단 사이에 빈 줄(띄어쓰기)이 있으면 그 빈 줄을 기준으로 묶어서 항목 하나씩 만들고(여러 줄이
-// 한 항목), 빈 줄이 전혀 없으면(그냥 줄바꿈만 있는 목록) 기존처럼 한 줄 = 항목 하나로 나눔
-function convertSelectionToChecklist() {
+// 이미 체크리스트 항목인 줄인지
+function isTaskLine(line) {
+  return /^\s*[-*+][ \t]+\[[ xX]\][ \t]/.test(line);
+}
+
+// 줄 앞에 이미 붙어있는 글머리표(- , * , 1. , - [ ] )를 떼어냄 — 버튼을 눌렀을 때 겹치지 않게
+function stripLineMarker(line) {
+  return line.replace(/^\s*([-*+][ \t]+\[[ xX]\][ \t]|[-*+][ \t]+|\d+\.[ \t]+)/, '');
+}
+
+// 선택 영역(선택이 없으면 커서가 있는 줄)을 줄 단위로 잘라서 앞뒤를 다듬어줌
+function selectedLineRange() {
   const ta = els.content;
-  let start = ta.selectionStart;
-  let end = ta.selectionEnd;
-  if (start === end) {
-    start = 0;
-    end = ta.value.length;
-  }
-  const raw = ta.value.slice(start, end);
+  const value = ta.value;
+  const start = value.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+  let end = value.indexOf('\n', ta.selectionEnd);
+  if (end === -1) end = value.length;
+  return { start, end, raw: value.slice(start, end) };
+}
+
+// 체크리스트 버튼 공통 처리.
+// byBlock = true  → 빈 줄 기준(빈 줄로 나뉜 덩어리 하나가 항목 하나. 덩어리 안 줄바꿈은 공백으로 합침)
+// byBlock = false → 한 줄 기준(줄 하나가 항목 하나)
+// 고른 줄이 전부 이미 체크리스트면 다시 눌렀을 때 해제됨(껐다 켜는 버튼)
+function applyChecklist(byBlock) {
+  const ta = els.content;
+  const { start, end, raw } = selectedLineRange();
+
   if (!raw.trim()) {
-    // 빈 메모(글자 선택도 없고 본문도 비어있음)에서 누르면 아무 일도 안 일어나던 문제 수정:
-    // btnChecklistAdd와 같은 방식으로 빈 항목 하나를 만들어줌
-    const newItem = { id: crypto.randomUUID(), text: '', checked: false };
-    memo.checklist = [...(memo.checklist || []), newItem];
-    renderChecklist();
-    persistChecklist();
-    const rows = els.checklistList.querySelectorAll('.checklist-item-text');
-    const lastRow = rows[rows.length - 1];
-    if (lastRow) lastRow.focus();
+    // 빈 줄에서 눌렀으면 빈 항목 하나를 만들어줌
+    ta.setRangeText('- [ ] ', start, end, 'end');
+    scheduleSave();
     return;
   }
 
-  const hasBlankLine = /\n[ \t]*\r?\n/.test(raw);
-  const groups = hasBlankLine
-    ? raw
-        .split(/\n[ \t]*\r?\n+/)
-        .map((block) => block.split('\n').map((l) => l.trim()).filter(Boolean).join(' '))
-        .filter(Boolean)
-    : raw.split('\n').map((l) => l.trim()).filter(Boolean);
-  if (!groups.length) return;
+  const nonEmpty = raw.split('\n').filter((l) => l.trim());
+  const allTasks = nonEmpty.length > 0 && nonEmpty.every(isTaskLine);
 
-  const newItems = groups.map((text) => ({ id: crypto.randomUUID(), text, checked: false }));
-  memo.checklist = [...(memo.checklist || []), ...newItems];
+  let out;
+  if (allTasks) {
+    // 해제: 앞의 "- [ ] "만 떼고 글자는 그대로 둠
+    out = raw.split('\n').map((l) => (isTaskLine(l) ? stripLineMarker(l) : l)).join('\n');
+  } else if (byBlock) {
+    out = raw
+      .split(/\n[ \t]*\r?\n+/)
+      .map((block) => block.split('\n').map((l) => stripLineMarker(l).trim()).filter(Boolean).join(' '))
+      .filter(Boolean)
+      .map((t) => `- [ ] ${t}`)
+      .join('\n');
+  } else {
+    out = raw
+      .split('\n')
+      .map((l) => (l.trim() ? `- [ ] ${stripLineMarker(l).trim()}` : ''))
+      .filter((l) => l !== '')
+      .join('\n');
+  }
 
-  ta.focus();
-  ta.setRangeText('', start, end, 'end');
+  ta.setRangeText(out, start, end, 'end');
   scheduleSave();
-
-  renderChecklist();
-  persistChecklist();
 }
 
-// 체크리스트를 통째로 취소하고 싶을 때: 모든 항목을 본문 맨 끝에 줄글로 되돌려놓고 목록은 비움
-// (체크 표시는 순수 텍스트로는 표현할 수 없어서 되돌리면 사라짐 — 그래서 되돌리기 전 확인창을 띄움)
-//
-// (수정) 원래 window.confirm()으로 물어봤었는데, 그 네이티브 확인창이 닫힌 뒤 이 메모창이
-// 계속 "잠긴 것처럼" 편집이 안 되는 문제가 refocusWindow()로도 완전히 안 고쳐졌음(드래그로
-// 텍스트 선택은 되는데 타이핑은 안 먹고, 다른 메모창을 갔다 와야 풀리는 증상 — Electron의
-// frame:false 창이 네이티브 다이얼로그 뒤에 진짜 키보드 포커스를 잘 못 돌려받는 근본적인
-// 문제로 보임). 그래서 네이티브 확인창을 아예 안 쓰고, 이 앱의 다른 곳들(파일명 입력,
-// 링크 URL 입력 등)처럼 직접 만든 HTML 모달로 바꿔서 이 문제 자체를 피해감
-function openChecklistRevertModal() {
-  const items = memo.checklist || [];
-  if (!items.length) return;
-  els.checklistRevertModal.hidden = false;
+function convertSelectionToChecklist() {
+  applyChecklist(true);
 }
 
-function closeChecklistRevertModal() {
-  els.checklistRevertModal.hidden = true;
+function convertSelectionToChecklistByLine() {
+  applyChecklist(false);
 }
 
-function doRevertChecklistToText() {
-  const items = memo.checklist || [];
-  if (!items.length) return;
-
-  const lines = items.map((it) => (it.text || '').trim()).filter(Boolean).join('\n');
-  const ta = els.content;
-  const existing = ta.value.replace(/\s+$/, '');
-  ta.value = existing && lines ? `${existing}\n\n${lines}` : (existing || lines);
-  ta.focus();
-  scheduleSave();
-
-  memo.checklist = [];
-  renderChecklist();
-  persistChecklist();
-}
-
-// 이미지를 처음 넣을 때만(설정에 기록될 때까지) 자동 리사이즈 안내를 한 번 보여줌
 function maybeShowImageResizeNotice() {
   if (hasSeenImageResizeNotice) return;
   hasSeenImageResizeNotice = true; // 같은 세션에서 여러 번 안 뜨게 먼저 막아둠
@@ -714,106 +1056,12 @@ els.imageResizeNoticeConfirm.addEventListener('click', () => {
   els.imageResizeNoticeModal.hidden = true;
 });
 
-els.checklistRevertCancel.addEventListener('click', closeChecklistRevertModal);
-els.checklistRevertConfirm.addEventListener('click', () => {
-  closeChecklistRevertModal();
-  doRevertChecklistToText();
-});
 
-function persistChecklist() {
-  window.api.setMemoChecklist(memo.id, memo.checklist || []);
-  markExportDirty();
-}
-
-function renderChecklist() {
-  const items = memo.checklist || [];
-  els.checklistArea.hidden = items.length === 0;
-  els.checklistList.innerHTML = '';
-  items.forEach((item) => els.checklistList.appendChild(createChecklistItemEl(item)));
-}
-
-function createChecklistItemEl(item) {
-  const row = document.createElement('div');
-  row.className = 'checklist-item' + (item.checked ? ' checked' : '');
-
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.checked = !!item.checked;
-  checkbox.addEventListener('change', () => {
-    item.checked = checkbox.checked;
-    row.classList.toggle('checked', item.checked);
-    persistChecklist();
-  });
-  row.appendChild(checkbox);
-
-  // 텍스트를 클릭해서 바로 고칠 수 있게 함(주제 이름 수정과 같은 패턴)
-  const text = document.createElement('span');
-  text.className = 'checklist-item-text';
-  text.contentEditable = 'true';
-  text.dataset.placeholder = LANG.memo.checklistItemPlaceholder;
-  text.textContent = item.text || '';
-  text.addEventListener('blur', () => {
-    item.text = text.textContent.trim();
-    text.textContent = item.text;
-    persistChecklist();
-  });
-  text.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      text.blur();
-    }
-  });
-  row.appendChild(text);
-
-  const delBtn = document.createElement('button');
-  delBtn.type = 'button';
-  delBtn.className = 'checklist-item-del';
-  delBtn.title = LANG.memo.checklistItemDeleteTitle;
-  delBtn.textContent = '×';
-  delBtn.addEventListener('click', () => {
-    // (수정) renderChecklist() 이후에 다른 곳으로 포커스를 옮기는 방식은 안 먹혔음 —
-    // innerHTML로 목록을 통째로 지우는 순간 방금 누른 × 버튼이 DOM에서 사라지면서
-    // 포커스가 잠깐이라도 카드 밖으로 나가버리고, 그 찰나에 :focus-within이 꺼지면서
-    // 옮기려던 대상(추가 버튼 등)도 같이 display:none 처리돼서 focus()가 그냥 무시됐음.
-    // 그래서 지우기 "전에" 미리 포커스를 본문(textarea, 포커스와 무관하게 항상 보임)으로
-    // 옮겨둬서 :focus-within이 끊기는 순간 자체가 생기지 않게 함
-    els.content.focus();
-    memo.checklist = (memo.checklist || []).filter((it) => it.id !== item.id);
-    renderChecklist();
-    persistChecklist();
-  });
-  row.appendChild(delBtn);
-
-  return row;
-}
-
-els.btnChecklistAdd.addEventListener('click', () => {
-  const newItem = { id: crypto.randomUUID(), text: '', checked: false };
-  memo.checklist = [...(memo.checklist || []), newItem];
-  renderChecklist();
-  persistChecklist();
-  const rows = els.checklistList.querySelectorAll('.checklist-item-text');
-  const lastRow = rows[rows.length - 1];
-  if (lastRow) lastRow.focus();
-});
-
-els.btnChecklistRevertAll.addEventListener('click', openChecklistRevertModal);
-
-// MD내보내기/복사/txt저장 등 본문 텍스트가 필요한 곳에서 체크리스트까지 합친 전체 텍스트가 필요할 때 사용
-function serializeChecklistText(items) {
-  if (!items || !items.length) return '';
-  return items
-    .filter((it) => it && it.text && it.text.trim())
-    .map((it) => `- [${it.checked ? 'x' : ' '}] ${it.text.trim()}`)
-    .join('\n');
-}
-
+// (0.19.1) 표도 본문 안으로 들어왔으므로 뒤에 따로 이어붙일 게 없음.
+// 이름은 그대로 두어 부르는 쪽(복사·txt 내보내기)을 안 건드림
 function fullTextWithChecklist() {
-  const checklistText = serializeChecklistText(memo.checklist);
-  if (!checklistText) return els.content.value;
-  return els.content.value.replace(/\s+$/, '') + '\n\n' + checklistText;
+  return els.content.value;
 }
-
 // ---- 특수문자 (설정에서 지정한 문자를 툴바 버튼으로 노출, 클릭시 커서 위치에 삽입) ----
 
 function insertAtCursor(text) {
@@ -824,6 +1072,484 @@ function insertAtCursor(text) {
   ta.setRangeText(text, start, end, 'end');
   scheduleSave();
 }
+
+// ---- 표 (0.19.1: 본문 안으로 들어감) ----------------------------------------
+// 예전에는 본문과 별개인 .table-area 에 실제 <table>을 그렸는데(memo.tables),
+// 0.19.1부터 표도 본문 글자("| 가 | 나 |")로 들어간다. 그리는 일은 mdeditor.js가 하고
+// 여기서는 "표 만들기"와 "커서가 표 안에 있을 때 뜨는 작은 버튼"만 담당한다.
+//
+// ⚠️ 열 폭 드래그 조절은 없앴음 — 칸 너비는 마크다운에 저장할 방법이 없어서
+//    앱에만 따로 보관하면 표를 고칠 때 폭 정보와 어긋난다(태훈님 확정 2026-08-15).
+
+// 커서가 표 안에 있을 때만 뜨는 조작 버튼들.
+// (0.19.1b) 한 곳에 몰아두면 "지금 어느 줄/어느 칸에 적용되는지"가 눈으로 안 보여서
+// 자리로 구분하도록 바꿈(태훈님 요청 2026-08-15):
+//   열 버튼(＋ －) = 표 "위", 커서가 있는 칸의 가로 위치에 맞춰서
+//   행 버튼(＋ －) = 표 "왼쪽", 커서가 있는 줄의 높이에 맞춰서
+//   표 버튼(복사/삭제) = 표 "아래"
+// ⚠️ 세 묶음 모두 body 바로 밑에 position:fixed로 띄움 — 카드 안(.toolbar/.bottombar)에
+//    넣으면 overflow:hidden 때문에 잘려서 안 보인다(0.18.0 형광펜 팔레트 실제 버그).
+let tableBars = null; // { col, row, tbl }
+
+function buildTableBars() {
+  if (tableBars) return tableBars;
+  const M = LANG.memo;
+  const make = (cls, defs) => {
+    const bar = document.createElement('div');
+    bar.className = `table-bar ${cls}`;
+    bar.hidden = true;
+    defs.forEach(([cmd, label, title, extra]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `table-bar-btn${extra ? ' ' + extra : ''}`;
+      btn.dataset.tcmd = cmd;
+      btn.textContent = label;
+      btn.title = title || label;
+      bar.appendChild(btn);
+    });
+    // 버튼을 누르는 순간 본문에서 포커스가 빠지면 커서 자리를 잃어버림(형광펜 팔레트와 같은 이유)
+    bar.addEventListener('mousedown', (e) => e.preventDefault());
+    bar.addEventListener('click', onTableBarClick);
+    document.body.appendChild(bar);
+    return bar;
+  };
+  tableBars = {
+    col: make('table-bar-col', [
+      ['addCol', '＋', M.tableBarAddColTitle],
+      ['deleteCol', '－', M.tableBarDeleteColTitle, 'danger'],
+    ]),
+    row: make('table-bar-row', [
+      ['addRow', '＋', M.tableBarAddRowTitle],
+      ['deleteRow', '－', M.tableBarDeleteRowTitle, 'danger'],
+    ]),
+    tbl: make('table-bar-tbl', [
+      ['copy', M.tableCopyButton, M.tableCopyButtonTitle],
+      ['deleteTable', M.tableDeleteButton, M.tableDeleteButtonTitle, 'danger'],
+    ]),
+  };
+  return tableBars;
+}
+
+async function onTableBarClick(e) {
+  const btn = e.target.closest('button[data-tcmd]');
+  if (!btn || locked) return;
+  const cmd = btn.dataset.tcmd;
+  if (cmd === 'copy') {
+    await copyTableAtCaret(btn);
+    return;
+  }
+  els.content.focus();
+  els.content.tableCommand(cmd);
+  scheduleSave();
+  updateTableBar();
+}
+
+// 커서가 표 안에 있으면 세 묶음을 각자 자리에 놓고, 아니면 전부 감춤
+function updateTableBar() {
+  const bars = buildTableBars();
+  const info = !locked && els.content.tableAtCaret ? els.content.tableAtCaret() : null;
+  const hideAll = () => { bars.col.hidden = true; bars.row.hidden = true; bars.tbl.hidden = true; };
+  if (!info || !info.firstLineEl || !info.lineEl) { hideAll(); return; }
+
+  const box = els.contentEl.getBoundingClientRect();
+  const first = info.firstLineEl.getBoundingClientRect();
+  const last = (info.lastLineEl || info.firstLineEl).getBoundingClientRect();
+  const tableTop = first.top;
+  const tableBottom = last.bottom;
+  const tableLeft = Math.min(first.left, last.left);
+  const tableRight = Math.max(first.right, last.right);
+  // 표가 스크롤 때문에 본문 영역 밖으로 나가 있으면 버튼도 감춤
+  if (tableBottom < box.top || tableTop > box.bottom) { hideAll(); return; }
+
+  const clampX = (x, el) => Math.max(2, Math.min(x, window.innerWidth - el.offsetWidth - 2));
+  const clampY = (y, el) => Math.max(2, Math.min(y, window.innerHeight - el.offsetHeight - 2));
+
+  // 열 버튼: 표 위, 커서가 있는 칸의 가운데
+  const cell = info.cellEl ? info.cellEl.getBoundingClientRect() : null;
+  bars.col.hidden = false;
+  const colX = cell ? cell.left + cell.width / 2 - bars.col.offsetWidth / 2 : tableLeft;
+  bars.col.style.left = `${clampX(colX, bars.col)}px`;
+  bars.col.style.top = `${clampY(tableTop - bars.col.offsetHeight - 3, bars.col)}px`;
+
+  // 행 버튼: 표 왼쪽, 커서가 있는 줄의 가운데. 왼쪽에 자리가 없으면 오른쪽으로 보냄
+  const line = info.lineEl.getBoundingClientRect();
+  bars.row.hidden = false;
+  let rowX = tableLeft - bars.row.offsetWidth - 3;
+  if (rowX < 2) rowX = tableRight + 3;
+  bars.row.style.left = `${clampX(rowX, bars.row)}px`;
+  bars.row.style.top = `${clampY(line.top + line.height / 2 - bars.row.offsetHeight / 2, bars.row)}px`;
+
+  // 표 버튼: 표 아래 왼쪽
+  bars.tbl.hidden = false;
+  bars.tbl.style.left = `${clampX(tableLeft, bars.tbl)}px`;
+  bars.tbl.style.top = `${clampY(tableBottom + 3, bars.tbl)}px`;
+}
+
+// 커서가 있는 표를 엑셀에 붙여넣을 수 있는 형태(탭 구분 텍스트 + HTML 표)로 복사
+async function copyTableAtCaret(btn) {
+  const rows = els.content.tableTextAtCaret && els.content.tableTextAtCaret();
+  if (!rows || !rows.length) return;
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const text = rows.map((r) => r.join('\t')).join('\n');
+  const headCells = rows[0].map((c) => `<th>${esc(c)}</th>`).join('');
+  const bodyRows = rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+  const html = `<table><thead><tr>${headCells}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+  const ok = await window.api.copyTable(text, html);
+  if (!ok) return;
+  const original = btn.textContent;
+  btn.textContent = LANG.memo.tableCopyDoneButton;
+  btn.classList.add('copied');
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove('copied');
+  }, 1200);
+}
+
+document.addEventListener('selectionchange', () => {
+  if (document.activeElement !== els.contentEl) return;
+  updateTableBar();
+});
+els.contentEl.addEventListener('blur', () => {
+  // 버튼을 누른 것 때문에 포커스가 빠진 경우까지 감추면 버튼이 안 눌리므로 잠깐 뒤에 확인
+  setTimeout(() => {
+    if (document.activeElement !== els.contentEl) hideTableBars();
+  }, 150);
+});
+els.contentEl.addEventListener('scroll', () => { if (tableBars && !tableBars.col.hidden) updateTableBar(); });
+window.addEventListener('resize', () => { if (tableBars && !tableBars.col.hidden) updateTableBar(); });
+
+function hideTableBars() {
+  if (!tableBars) return;
+  tableBars.col.hidden = true;
+  tableBars.row.hidden = true;
+  tableBars.tbl.hidden = true;
+}
+
+// ---- 표 삽입 버튼: 격자를 가리켰다 떼면(드래그하듯) 그 크기의 빈 표를 만듦 ----
+const TABLE_GRID_ROWS = 8;
+const TABLE_GRID_COLS = 8;
+let tableGridBuilt = false;
+let tablePickerRows = 0;
+let tablePickerCols = 0;
+
+function buildTableGrid() {
+  if (tableGridBuilt) return;
+  tableGridBuilt = true;
+  els.tableGrid.innerHTML = '';
+  for (let r = 1; r <= TABLE_GRID_ROWS; r += 1) {
+    for (let c = 1; c <= TABLE_GRID_COLS; c += 1) {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'table-grid-cell';
+      cell.dataset.row = String(r);
+      cell.dataset.col = String(c);
+      // 마우스가 지나가는 칸마다 미리보기 갱신 — 실제 드래그(누른 채 이동)든 그냥 가리키기든
+      // 똑같이 동작함. 확정은 클릭 위치가 아니라 "손을 떼는 순간"(mouseup, 격자 전체에서
+      // 한 번만 등록)의 마지막 미리보기 크기로 함 — 드래그 중엔 mousedown/mouseup 칸이
+      // 서로 달라서 click 이벤트 자체가 안 일어나는 경우가 있기 때문
+      cell.addEventListener('mouseenter', () => setTablePickerPreview(r, c));
+      els.tableGrid.appendChild(cell);
+    }
+  }
+  els.tableGrid.addEventListener('mouseup', () => confirmTablePicker());
+}
+
+function setTablePickerPreview(rows, cols) {
+  tablePickerRows = rows;
+  tablePickerCols = cols;
+  els.tableGrid.querySelectorAll('.table-grid-cell').forEach((cell) => {
+    const picked = Number(cell.dataset.row) <= rows && Number(cell.dataset.col) <= cols;
+    cell.classList.toggle('picked', picked);
+  });
+  els.tableGridSize.textContent = rows && cols ? fmt(LANG.memo.tableGridSizeLabel, { rows, cols }) : '';
+}
+
+function openTableModal() {
+  buildTableGrid();
+  setTablePickerPreview(0, 0);
+  els.tableModalPasteHint.textContent = LANG.memo.tableModalPasteHint; // 지난번 "붙여넣을 표 없음" 오류문구가 남아있지 않게 초기화
+  els.tableModal.hidden = false;
+}
+
+function closeTableModal() {
+  els.tableModal.hidden = true;
+}
+
+// 고른 행/열 크기의 빈 표를 본문의 커서 자리에 넣음 (0.19.1: 별도 영역이 아니라 본문 안)
+function confirmTablePicker() {
+  if (tablePickerRows < 1 || tablePickerCols < 1) return;
+  closeTableModal();
+  els.content.focus();
+  els.content.insertTable(tablePickerRows, tablePickerCols);
+  scheduleSave();
+  updateTableBar();
+}
+
+// 클립보드에 있는 표(엑셀 등에서 복사한 것)를 그대로 새 표로 붙여넣음.
+// html에 <table>이 있으면 그걸 우선 파싱(칸 구분이 더 정확함), 없으면 text를
+// 줄바꿈=행 / 탭=칸(TSV)으로 봄 — 엑셀/시트에서 칸을 복사하면 이 두 형식이 같이 클립보드에 담김
+function parseClipboardTable(html, text) {
+  if (html && /<table/i.test(html)) {
+    try {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const trs = Array.from(doc.querySelectorAll('table tr'));
+      const htmlRows = trs
+        .map((tr) => Array.from(tr.querySelectorAll('td,th')).map((cell) => cell.textContent.trim()))
+        .filter((r) => r.length > 0);
+      if (htmlRows.length) return padRowsToSameWidth(htmlRows);
+    } catch (err) {
+      // html 파싱이 실패하면 그냥 아래 일반 텍스트(TSV) 방식으로 넘어감
+    }
+  }
+  const plain = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = plain.split('\n').filter((l) => l.length > 0);
+  if (!lines.length) return null;
+  return padRowsToSameWidth(lines.map((l) => l.split('\t')));
+}
+
+// 표는 모든 줄의 칸 수가 같아야 하므로, 가장 긴 줄 기준으로 짧은 줄 뒤를 빈 칸으로 채움
+function padRowsToSameWidth(rows) {
+  const maxCols = Math.max(...rows.map((r) => r.length));
+  if (!maxCols) return null;
+  return rows.map((r) => {
+    const padded = r.slice(0, maxCols);
+    while (padded.length < maxCols) padded.push('');
+    return padded;
+  });
+}
+
+els.tableModalPaste.addEventListener('click', async () => {
+  const { html, text } = await window.api.pasteTable();
+  const rows = parseClipboardTable(html, text);
+  if (!rows) {
+    els.tableModalPasteHint.textContent = LANG.memo.tableModalPasteEmptyError;
+    return;
+  }
+  closeTableModal();
+  els.content.focus();
+  els.content.insertTable(0, 0, rows);
+  scheduleSave();
+  updateTableBar();
+});
+
+els.tableModalCancel.addEventListener('click', closeTableModal);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!els.tableModal.hidden) closeTableModal();
+  else if (!els.imageAnnotateModal.hidden) closeImageAnnotator();
+});
+
+// ---- 첨부 이미지 그림그리기(선/화살표/번호): 첨부 이미지를 끌지 않고 그냥 클릭하면 열림 ----
+// (attachDragHandlers의 onUp에서 dragged가 false일 때 openImageAnnotator를 호출함)
+const ANNOTATE_SUPPORTED_EXT = ['.png', '.jpg', '.jpeg']; // gif/webp/svg는 원본 형식을 지켜야 해서 제외(자동 리사이즈 예외 목록과 같은 이유)
+let annotateTarget = null; // 지금 그림 그리는 중인 첨부 객체(memo.attachments의 항목)
+let annotateBaseImg = null; // 캔버스 배경으로 그릴, 이미 화면에 떠 있는 <img> 엘리먼트
+let annotateStrokes = []; // 이번에 그린 도형들(선/화살표/번호) - 쌓인 순서 그대로 실행취소에도 씀
+let annotateTool = 'line';
+let annotateColor = '#ff3b30';
+let annotateNumberNext = 1;
+
+function attachmentExt(storedName) {
+  const i = storedName.lastIndexOf('.');
+  return i === -1 ? '' : storedName.slice(i).toLowerCase();
+}
+
+function openImageAnnotator(a, imgEl) {
+  if (!ANNOTATE_SUPPORTED_EXT.includes(attachmentExt(a.storedName))) {
+    els.statusText.textContent = LANG.memo.imageAnnotateUnsupported;
+    setTimeout(() => (els.statusText.textContent = ''), 1800);
+    return;
+  }
+  annotateTarget = a;
+  annotateBaseImg = imgEl;
+  annotateStrokes = [];
+  annotateNumberNext = 1;
+  annotateTool = 'line';
+  annotateColor = '#ff3b30';
+  updateAnnotateToolButtons();
+  updateAnnotateColorButtons();
+  els.imageAnnotateHint.textContent = LANG.memo.imageAnnotateHint; // 지난번 저장실패 문구가 남아있지 않게 초기화
+
+  els.annotateCanvas.width = imgEl.naturalWidth;
+  els.annotateCanvas.height = imgEl.naturalHeight;
+  redrawAnnotateCanvas();
+
+  els.imageAnnotateModal.hidden = false;
+}
+
+function closeImageAnnotator() {
+  els.imageAnnotateModal.hidden = true;
+  annotateTarget = null;
+  annotateBaseImg = null;
+  annotateStrokes = [];
+}
+
+function redrawAnnotateCanvas() {
+  const cvs = els.annotateCanvas;
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  if (annotateBaseImg) ctx.drawImage(annotateBaseImg, 0, 0, cvs.width, cvs.height);
+  annotateStrokes.forEach((s) => drawAnnotateStroke(ctx, s));
+}
+
+// 선 굵기/번호 원 크기를 이미지 해상도에 비례하게 정해서, 이미지가 커도 작아도 눈에 잘 띄게 함
+function annotateLineWidth(canvasWidth) {
+  return Math.max(3, Math.round(canvasWidth / 260));
+}
+
+function drawAnnotateLine(ctx, x1, y1, x2, y2, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = annotateLineWidth(ctx.canvas.width);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawAnnotateArrow(ctx, x1, y1, x2, y2, color) {
+  const lw = annotateLineWidth(ctx.canvas.width);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+
+  const headLen = Math.max(12, lw * 4.5);
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const spread = Math.PI / 7;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - headLen * Math.cos(angle - spread), y2 - headLen * Math.sin(angle - spread));
+  ctx.lineTo(x2 - headLen * Math.cos(angle + spread), y2 - headLen * Math.sin(angle + spread));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawAnnotateNumber(ctx, x, y, n, color) {
+  const r = Math.max(14, Math.round(ctx.canvas.width / 40));
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = `700 ${Math.round(r * 1.15)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(n), x, y + 1);
+  ctx.restore();
+}
+
+function drawAnnotateStroke(ctx, s) {
+  if (s.type === 'line') drawAnnotateLine(ctx, s.x1, s.y1, s.x2, s.y2, s.color);
+  else if (s.type === 'arrow') drawAnnotateArrow(ctx, s.x1, s.y1, s.x2, s.y2, s.color);
+  else if (s.type === 'number') drawAnnotateNumber(ctx, s.x, s.y, s.n, s.color);
+}
+
+// 화면에 보이는 캔버스 크기(CSS로 줄어들어 있음)와 캔버스 내부 실제 해상도가 서로 달라서,
+// 마우스 좌표를 캔버스 내부 좌표로 환산해야 클릭한 자리에 정확히 그려짐
+function annotateCanvasPoint(e) {
+  const cvs = els.annotateCanvas;
+  const rect = cvs.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (cvs.width / rect.width),
+    y: (e.clientY - rect.top) * (cvs.height / rect.height)
+  };
+}
+
+function updateAnnotateToolButtons() {
+  [els.annotateToolLine, els.annotateToolArrow, els.annotateToolNumber].forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tool === annotateTool);
+  });
+}
+
+function updateAnnotateColorButtons() {
+  els.annotateColorSwatches.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.color === annotateColor);
+  });
+}
+
+[els.annotateToolLine, els.annotateToolArrow, els.annotateToolNumber].forEach((btn) => {
+  btn.addEventListener('click', () => {
+    annotateTool = btn.dataset.tool;
+    updateAnnotateToolButtons();
+  });
+});
+
+els.annotateColorSwatches.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    annotateColor = btn.dataset.color;
+    updateAnnotateColorButtons();
+  });
+});
+
+// 되돌리기: 마지막으로 그린 도형 하나만 지움(캔버스를 처음부터 다시 그려서 구현 — 그래서 항상 정확함).
+// 방금 지운 게 마지막 번호였으면, 다음 번호도 한 칸 되돌려서 번호가 다시 이어지게 함
+els.annotateUndo.addEventListener('click', () => {
+  const last = annotateStrokes[annotateStrokes.length - 1];
+  if (!last) return;
+  if (last.type === 'number' && last.n === annotateNumberNext - 1) annotateNumberNext -= 1;
+  annotateStrokes.pop();
+  redrawAnnotateCanvas();
+});
+
+// 번호 도구는 클릭 한 번으로 바로 찍히고(누를 때마다 다음 숫자), 선/화살표는 눌러서 끈 채
+// 움직이는 동안 미리보기를 보여주다가 손을 떼는 순간 확정됨
+els.annotateCanvas.addEventListener('mousedown', (e) => {
+  if (!annotateTarget) return;
+  e.preventDefault();
+  const start = annotateCanvasPoint(e);
+
+  if (annotateTool === 'number') {
+    annotateStrokes.push({ type: 'number', x: start.x, y: start.y, n: annotateNumberNext, color: annotateColor });
+    annotateNumberNext += 1;
+    redrawAnnotateCanvas();
+    return;
+  }
+
+  function onMove(ev) {
+    const cur = annotateCanvasPoint(ev);
+    redrawAnnotateCanvas();
+    const ctx = els.annotateCanvas.getContext('2d');
+    if (annotateTool === 'arrow') drawAnnotateArrow(ctx, start.x, start.y, cur.x, cur.y, annotateColor);
+    else drawAnnotateLine(ctx, start.x, start.y, cur.x, cur.y, annotateColor);
+  }
+  function onUp(ev) {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    const end = annotateCanvasPoint(ev);
+    if (Math.hypot(end.x - start.x, end.y - start.y) < 4) { redrawAnnotateCanvas(); return; } // 거의 제자리(클릭 실수)면 무시
+    annotateStrokes.push({ type: annotateTool, x1: start.x, y1: start.y, x2: end.x, y2: end.y, color: annotateColor });
+    redrawAnnotateCanvas();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+els.imageAnnotateCancel.addEventListener('click', closeImageAnnotator);
+
+els.imageAnnotateSave.addEventListener('click', async () => {
+  if (!annotateTarget) return;
+  const base64 = els.annotateCanvas.toDataURL('image/png').split(',')[1];
+  const ok = await window.api.overwriteAttachmentImage(annotateTarget.storedName, base64);
+  if (!ok) {
+    els.imageAnnotateHint.textContent = LANG.memo.imageAnnotateSaveError;
+    return;
+  }
+  // 파일을 덮어썼으므로 주소 뒤 번호를 올려 브라우저가 옛 그림을 다시 쓰지 않게 함
+  imageVersion.set(annotateTarget.storedName, (imageVersion.get(annotateTarget.storedName) || 0) + 1);
+  closeImageAnnotator();
+  markExportDirty();
+  renderAttachments();
+});
 
 function renderSpecialChars(chars) {
   const list = Array.isArray(chars) ? chars : [];
@@ -853,6 +1579,8 @@ window.api.onSettingsUpdated(async () => {
 // 꺼지면 자리를 비우지 않고 display:none으로 없애서 남은 버튼들이 자동으로 당겨붙음(memo.css 참고)
 function applyMdFeatureState() {
   document.body.classList.toggle('md-off', !mdFeatureEnabled);
+  // MD 기능을 끄면 서식을 그리지 않고 원문 그대로 보여줌(내용은 어느 쪽이든 동일)
+  if (els.content && els.content.refresh) els.content.refresh();
 }
 
 // ---- 첨부파일 ----
@@ -864,130 +1592,113 @@ async function handleAttach() {
     memo.attachments.push(file);
   }
   markExportDirty();
-  renderAttachments();
+  // 먼저 파일 경로를 다 읽어둬야(await) 본문에 넣는 순간 그림이 보임
+  await renderAttachments();
+  files.forEach((file) => { if (file.isImage) insertImageAtCursor(file); });
   if (files.some((file) => file.isImage)) maybeShowImageResizeNotice();
 }
 
-let attachmentObservers = [];
+/* ---- 본문 안 이미지 (3단계, 0.19.2) ------------------------------------
+   0.19.1까지는 이미지가 본문과 완전히 별개였다 — canvas-layer 위에 절대좌표로
+   얹혀 있어서 글을 써도 안 밀렸고, 아무 데나 끌어다 놓을 수 있었다.
 
-// 새로 추가된 이미지가 겹치지 않게 대각선으로 하나씩 밀려나는 기본 위치 계산
-function computeDefaultPosition(index) {
-  const step = 24;
-  const cascade = index % 6;
-  return { x: 14 + cascade * step, y: 14 + cascade * step };
+   [태훈님 확정 2026-08-15] 자유 배치를 버리고 전부 본문 줄로 바꿈.
+   마크다운에는 "x=120, y=340"을 적을 칸이 없어서 자유 배치는 md로 저장할 방법이
+   아예 없기 때문(표 열 폭 때와 같은 결론). 이제 이미지는 본문의 "![[그림.png|400]]"
+   한 줄이고, 글을 쓰면 같이 밀린다.
+
+   여기서 하는 일은 "파일 이름 → 화면에 띄울 주소"를 mdeditor에 알려주는 것뿐이다.
+   실제로 그리는 건 mdeditor.js가 한다.
+   ---------------------------------------------------------------------- */
+
+// 이름 → file:// 주소. 그림 그리기로 파일을 덮어쓰면 imageVersion을 올려서 새로 읽게 함.
+// 매번 Date.now()를 붙이지 않는 이유: 줄을 다시 그릴 때마다 그림을 새로 내려받아 깜빡임
+const imagePaths = new Map();
+const imageVersion = new Map();
+
+createMdEditor.setImageResolver((name) => {
+  const p = imagePaths.get(name);
+  if (!p) return '';
+  const v = imageVersion.get(name) || 0;
+  return `file://${p}${v ? `?v=${v}` : ''}`;
+});
+
+// 본문 안 그림을 누르면 예전과 똑같이 그림그리기(선·화살표·번호) 창이 열림.
+// 그린 내용은 이미지 파일 자체에 구워져 저장되므로 본문 안으로 들어와도 그대로 동작함
+if (els.content && els.content.setImageClick) {
+  els.content.setImageClick((name, imgEl) => {
+    if (locked) return;
+    const a = (memo.attachments || []).find((x) => x.storedName === name);
+    if (a) openImageAnnotator(a, imgEl);
+  });
 }
 
-// 설명칸의 기본 크기(px). 사용자가 아직 옮기거나 늘린 적 없으면(옛 메모 포함) 이 값을 씀
-const CAPTION_HEIGHT = 22;
-const CAPTION_WIDTH = 140;
+// 첨부 이미지들의 실제 경로를 미리 읽어둠(그리기는 동기라서 미리 있어야 함)
+async function loadImagePaths() {
+  for (const a of memo.attachments || []) {
+    if (!a.isImage || imagePaths.has(a.storedName)) continue;
+    const p = await window.api.getAttachmentPath(a.storedName);
+    if (p) imagePaths.set(a.storedName, p);
+  }
+}
 
 async function renderAttachments() {
-  attachmentObservers.forEach((ro) => ro.disconnect());
-  attachmentObservers = [];
-  els.canvasLayer.innerHTML = '';
   els.attachmentStrip.innerHTML = '';
-
-  let imageIndex = 0;
+  rememberBodyImages();
+  await loadImagePaths();
+  // 이미지가 아닌 파일만 아래 첨부 줄에 남음(이미지는 본문 안으로 들어갔음)
   for (const a of memo.attachments) {
-    if (a.isImage) {
-      await renderCanvasImage(a, imageIndex);
-      imageIndex += 1;
-    } else {
-      renderFileChip(a);
-    }
+    if (!a.isImage) renderFileChip(a);
   }
+  if (els.content && els.content.refresh) els.content.refresh();
 }
 
-// 그림판처럼 본문 위에 자유롭게 놓이는 이미지 하나 + 그 이미지에 딸린 설명칸을 그림
-// - 이미지(box>body>img): 위치/크기 자유
-// - 설명칸(captionBox>textarea): 이미지와는 별개의 독립된 상자. 이미지 기준 상대좌표
-//   (captionOffsetX/Y)로 저장해서, 이미지를 옮기면 같이 따라가지만 ⠿ 손잡이로 따로 잡으면
-//   원하는 방향 아무 곳에나 뗄 수 있음
-async function renderCanvasImage(a, index) {
-  const filePath = await window.api.getAttachmentPath(a.storedName);
-  const box = document.createElement('div');
-  box.className = 'canvas-image';
+/* 본문에서 그림 줄을 지우면 그림도 완전히 지움 (태훈님 확정 2026-08-15).
+   0.19.1까지는 그림에 ✕ 버튼이 붙어 있었지만, 이제 그림은 본문의 한 줄이므로
+   "줄을 지우는 것 = 그림을 지우는 것"으로 통일했다.
 
-  const pos = a.displayX != null ? { x: a.displayX, y: a.displayY } : computeDefaultPosition(index);
-  box.style.left = pos.x + 'px';
-  box.style.top = pos.y + 'px';
-  const width = a.displayWidth || 140;
-  const height = a.displayHeight || 100;
-  box.style.width = width + 'px';
-  box.style.height = height + 'px';
-  if (a.displayX == null) {
-    // 처음 배치되는 기본 위치는 바로 저장해둬서 다음에 열어도 같은 자리에 있도록 함
-    window.api.updateAttachmentPosition(memo.id, a.storedName, pos.x, pos.y);
-    a.displayX = pos.x;
-    a.displayY = pos.y;
-  }
+   지우는 시점을 저장(0.5초 뒤)에 맞춘 이유: 실수로 지웠을 때 바로 Ctrl+Z를 누르면
+   저장이 미뤄지면서 파일까지 지워지는 일을 피할 수 있음.
+   [가장 중요한 안전장치] "한 번이라도 본문에 있었던 그림"만 지운다(bodyImages).
+   변환이 건너뛰어진 메모는 처음부터 본문에 그림 줄이 없으므로 이 목록이 비어 있고,
+   따라서 첨부가 통째로 지워지는 사고가 구조적으로 일어날 수 없다. */
+const bodyImages = new Set();
 
-  const body = document.createElement('div');
-  body.className = 'canvas-image-body';
-  body.style.width = width + 'px';
-  body.style.height = height + 'px';
-
-  const img = document.createElement('img');
-  img.src = `file://${filePath}`;
-  img.title = a.originalName;
-  body.appendChild(img);
-  box.appendChild(body);
-
-  const removeBtn = document.createElement('button');
-  removeBtn.className = 'attachment-remove';
-  removeBtn.title = LANG.memo.imageDeleteTitle;
-  removeBtn.textContent = '×';
-  removeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    handleRemoveAttachment(a.storedName);
-  });
-  box.appendChild(removeBtn);
-
-  els.canvasLayer.appendChild(box);
-
-  // ---- 설명칸(이미지와 분리된 별도 상자) ----
-  const captionBox = document.createElement('div');
-  captionBox.className = 'caption-box';
-  const capWidth = a.captionWidth || width || CAPTION_WIDTH;
-  const capHeight = a.captionHeight || CAPTION_HEIGHT;
-  // 기본값: 옮긴 적 없으면 이미지 바로 아래(offsetY=이미지 높이, offsetX=0)에 둠
-  const offsetX = a.captionOffsetX != null ? a.captionOffsetX : 0;
-  const offsetY = a.captionOffsetY != null ? a.captionOffsetY : height;
-  captionBox.style.left = (pos.x + offsetX) + 'px';
-  captionBox.style.top = (pos.y + offsetY) + 'px';
-  captionBox.style.width = capWidth + 'px';
-  captionBox.style.height = capHeight + 'px';
-
-  const caption = document.createElement('textarea');
-  caption.className = 'canvas-image-caption';
-  caption.placeholder = LANG.memo.captionPlaceholder;
-  caption.value = a.caption || '';
-  caption.style.width = capWidth + 'px';
-  caption.style.height = capHeight + 'px';
-  caption.title = LANG.memo.captionTitle;
-  caption.addEventListener('mousedown', (e) => e.stopPropagation()); // 드래그 핸들러와 충돌 방지
-  caption.addEventListener('change', () => {
-    a.caption = caption.value;
-    window.api.updateAttachmentCaption(memo.id, a.storedName, caption.value);
-    markExportDirty();
-  });
-  captionBox.appendChild(caption);
-
-  const moveHandle = document.createElement('div');
-  moveHandle.className = 'caption-move-handle';
-  moveHandle.title = LANG.memo.captionMoveHandleTitle;
-  moveHandle.textContent = '⠿';
-  captionBox.appendChild(moveHandle);
-
-  els.canvasLayer.appendChild(captionBox);
-
-  attachDragHandlers(box, body, captionBox, a);
-  attachResizeObserver(box, body, a);
-  attachCaptionDragHandlers(captionBox, moveHandle, box, a);
-  attachCaptionResizeObserver(captionBox, caption, a);
+function rememberBodyImages() {
+  const re = /!\[\[([^\[\]|\n]+?)(?:\|\d+)?\]\]/g;
+  let m;
+  while ((m = re.exec(memo.content || ''))) bodyImages.add(m[1].trim());
 }
 
-// 이미지가 아닌 첨부(문서 등)는 기존처럼 하단에 작은 칩으로 표시
+async function pruneUnusedImages() {
+  const body = memo.content || '';
+  const gone = (memo.attachments || []).filter(
+    (a) => a && a.isImage && a.storedName
+      && bodyImages.has(a.storedName)
+      && !body.includes(`![[${a.storedName}`)
+  );
+  if (!gone.length) return;
+  for (const a of gone) {
+    const updated = await window.api.removeAttachment(memo.id, a.storedName);
+    if (updated) memo.attachments = updated.attachments || [];
+    bodyImages.delete(a.storedName);
+    imagePaths.delete(a.storedName);
+    imageVersion.delete(a.storedName);
+  }
+  markExportDirty();
+}
+
+// 새 이미지를 본문 커서 자리에 넣음. 폭은 안 적음(원본 크기, 메모창 폭까지만)
+function insertImageAtCursor(attachment) {
+  if (!attachment || !attachment.isImage) return;
+  if (!els.content || !els.content.insertImage) return;
+  els.content.focus();
+  els.content.insertImage(attachment.storedName);
+  memo.content = els.content.value;
+  bodyImages.add(attachment.storedName);
+  scheduleSave();
+}
+
 function renderFileChip(a) {
   const item = document.createElement('div');
   item.className = 'attachment-item';
@@ -1015,136 +1726,6 @@ function renderFileChip(a) {
   item.appendChild(removeBtn);
 
   els.attachmentStrip.appendChild(item);
-}
-
-// 모서리(약 14px, body의 리사이즈 핸들 영역) 를 잡으면 브라우저 기본 리사이즈에 맡기고,
-// 그 외 영역을 잡으면 드래그로 이동 (이동 대상은 바깥 box, 크기 기준은 안쪽 body).
-// 이미지를 옮기는 동안 설명칸(captionBox)도 같은 이동량만큼 같이 옮겨서 항상 따라오게 함
-// (설명칸 자체의 상대위치 값은 바뀌지 않으므로 따로 저장하지 않아도 됨)
-function attachDragHandlers(box, body, captionBox, a) {
-  body.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.attachment-remove')) return;
-    const rect = body.getBoundingClientRect();
-    const nearResizeCorner =
-      rect.right - e.clientX < 16 && rect.bottom - e.clientY < 16;
-    if (nearResizeCorner) return; // 리사이즈 핸들은 브라우저 기본 동작 사용
-
-    e.preventDefault();
-    const areaRect = els.editorArea.getBoundingClientRect();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startLeft = box.offsetLeft;
-    const startTop = box.offsetTop;
-    const captionStartLeft = captionBox.offsetLeft;
-    const captionStartTop = captionBox.offsetTop;
-
-    function onMove(ev) {
-      let nextLeft = startLeft + (ev.clientX - startX);
-      let nextTop = startTop + (ev.clientY - startY);
-      nextLeft = Math.max(0, Math.min(nextLeft, areaRect.width - 30));
-      nextTop = Math.max(0, Math.min(nextTop, areaRect.height - 30));
-      const appliedDx = nextLeft - startLeft;
-      const appliedDy = nextTop - startTop;
-      box.style.left = nextLeft + 'px';
-      box.style.top = nextTop + 'px';
-      captionBox.style.left = (captionStartLeft + appliedDx) + 'px';
-      captionBox.style.top = (captionStartTop + appliedDy) + 'px';
-    }
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      const x = box.offsetLeft;
-      const y = box.offsetTop;
-      a.displayX = x;
-      a.displayY = y;
-      window.api.updateAttachmentPosition(memo.id, a.storedName, x, y);
-    }
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
-}
-
-// body(안쪽)를 사용자가 리사이즈하면, 바깥 box도 즉시 같은 크기로 맞춰서
-// 삭제버튼(box의 자식) 위치가 항상 실제 이미지 모서리에 딱 맞게 함. 저장은 디바운스.
-// (ResizeObserver는 observe() 호출 직후 최초 1회 자동으로 콜백이 실행되는데,
-//  그 최초 호출까지 저장해버리면 열 때마다 미세하게 사이즈가 틀어질 수 있어 첫 콜백은 저장을 건너뜀)
-function attachResizeObserver(box, body, a) {
-  let resizeTimer = null;
-  let isFirstCallback = true;
-  const ro = new ResizeObserver((entries) => {
-    const { width, height } = entries[0].contentRect;
-    box.style.width = width + 'px';
-    box.style.height = height + 'px';
-    if (isFirstCallback) {
-      isFirstCallback = false;
-      return;
-    }
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      window.api.updateAttachmentSize(memo.id, a.storedName, width, height);
-      a.displayWidth = Math.round(width);
-      a.displayHeight = Math.round(height);
-    }, 400);
-  });
-  ro.observe(body);
-  attachmentObservers.push(ro);
-}
-
-// 설명칸의 ⠿ 손잡이를 드래그하면 이미지와 상관없이 원하는 위치로 옮길 수 있음.
-// 다음에 열 때도 같은 자리이도록, 이미지 기준 상대좌표(offset)로 저장해둠
-function attachCaptionDragHandlers(captionBox, moveHandle, box, a) {
-  moveHandle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const areaRect = els.editorArea.getBoundingClientRect();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startLeft = captionBox.offsetLeft;
-    const startTop = captionBox.offsetTop;
-
-    function onMove(ev) {
-      let nextLeft = startLeft + (ev.clientX - startX);
-      let nextTop = startTop + (ev.clientY - startY);
-      nextLeft = Math.max(0, Math.min(nextLeft, areaRect.width - 30));
-      nextTop = Math.max(0, Math.min(nextTop, areaRect.height - 30));
-      captionBox.style.left = nextLeft + 'px';
-      captionBox.style.top = nextTop + 'px';
-    }
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      const offsetX = captionBox.offsetLeft - box.offsetLeft;
-      const offsetY = captionBox.offsetTop - box.offsetTop;
-      a.captionOffsetX = offsetX;
-      a.captionOffsetY = offsetY;
-      window.api.updateAttachmentCaptionOffset(memo.id, a.storedName, offsetX, offsetY);
-    }
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
-}
-
-// 설명칸을 사용자가 모서리를 드래그해서 늘리거나 줄이면(포토샵 텍스트박스처럼) 그 크기를 기억해둠
-function attachCaptionResizeObserver(captionBox, caption, a) {
-  let resizeTimer = null;
-  let isFirstCallback = true;
-  const ro = new ResizeObserver((entries) => {
-    const { width, height } = entries[0].contentRect;
-    captionBox.style.width = width + 'px';
-    captionBox.style.height = height + 'px';
-    if (isFirstCallback) {
-      isFirstCallback = false;
-      return;
-    }
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      window.api.updateAttachmentCaptionSize(memo.id, a.storedName, width, height);
-      a.captionWidth = Math.round(width);
-      a.captionHeight = Math.round(height);
-    }, 400);
-  });
-  ro.observe(caption);
-  attachmentObservers.push(ro);
 }
 
 // 첨부 삭제: 데이터/본문 참조/실제 파일을 함께 제거 (memos:removeAttachment 처리 결과로 로컬 상태 동기화)
@@ -1347,50 +1928,19 @@ async function insertMemoLink(fileNameNoExt) {
 
 window.api.onMemoLinkSelected((fileNameNoExt) => insertMemoLink(fileNameNoExt));
 
-// ---- 다른 주제로 이동 모달 ----
-// 지금 속한 주제는 목록에서 빼고 보여줌(같은 주제로 "이동"할 필요는 없으니까)
+// ---- 다른 주제로 이동 ----
+// 메모지 안에 갇혀 있던 모달이었으나, 주제가 많으면 고르기 힘들다는 문제로
+// 메모 연결 팝업과 같은 방식의 별도 작은 창(renderer/moveTopic)으로 분리함.
+// 이 창(메모지)은 그 팝업에서 뭘 골랐는지만 이벤트로 전달받아 실제 이동 처리를 함
 
-async function openMoveTopicModal() {
-  const topics = await window.api.getTopics();
-  renderMoveTopicList(topics.filter((t) => t.id !== memo.topicId));
-  els.moveTopicModal.hidden = false;
-}
+els.btnMoveTopic.addEventListener('click', () => {
+  window.api.openMoveTopicWindow(memo.id);
+});
 
-function closeMoveTopicModal() {
-  els.moveTopicModal.hidden = true;
-}
-
-function renderMoveTopicList(topics) {
-  els.moveTopicList.innerHTML = '';
-  if (!topics.length) {
-    const empty = document.createElement('div');
-    empty.className = 'memo-link-empty';
-    empty.textContent = LANG.memo.moveTopicEmpty;
-    els.moveTopicList.appendChild(empty);
-    return;
-  }
-  topics.forEach((t) => {
-    const item = document.createElement('div');
-    item.className = 'memo-link-item move-topic-item';
-    item.innerHTML = `
-      <span class="swatch" style="background:${t.color};color:${t.textColor || '#FFFFFF'}">${escapeHtmlSafe(t.iconChar || '')}</span>
-      <span>${escapeHtmlSafe(t.name)}</span>
-    `;
-    item.addEventListener('click', () => moveToTopic(t.id));
-    els.moveTopicList.appendChild(item);
-  });
-}
-
-// 이 파일엔 escapeHtml 헬퍼가 따로 없어서, 목록에 이름 그대로 넣지 않고 안전하게 이스케이프해줌
-function escapeHtmlSafe(str) {
-  const div = document.createElement('div');
-  div.textContent = str == null ? '' : String(str);
-  return div.innerHTML;
-}
+window.api.onMoveTopicSelected((topicId) => moveToTopic(topicId));
 
 async function moveToTopic(topicId) {
   const updated = await window.api.moveMemoToTopic(memo.id, topicId);
-  closeMoveTopicModal();
   if (!updated) return;
   memo.topicId = updated.topicId;
   memo.color = updated.color;
@@ -1399,12 +1949,17 @@ async function moveToTopic(topicId) {
   markExportDirty(); // 주제가 바뀌면 MD내보내기의 태그도 바뀌므로 다시 내보내야 함
 }
 
-els.btnMoveTopic.addEventListener('click', openMoveTopicModal);
-els.moveTopicModalCancel.addEventListener('click', closeMoveTopicModal);
+// 이 파일엔 escapeHtml 헬퍼가 따로 없어서, 목록에 이름 그대로 넣지 않고 안전하게 이스케이프해줌
+// (아래 템플릿 저장 모달에서 씀 — 주제 이동은 별도 창(renderer/moveTopic)으로 분리되며 그쪽에 자기만의 사본을 둠)
+function escapeHtmlSafe(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
+}
 
 // ---- 템플릿으로 저장 모달 ----
-// 이동 모달과 같은 UI 패턴(주제 선택)을 쓰되, 지금 속한 주제도 목록에 포함시킴
-// (같은 주제에 템플릿을 저장하는 것도 자연스러운 사용법이라 뺄 이유가 없음)
+// 예전엔 "이동 모달과 같은 UI 패턴"이었으나, 이동은 별도 창으로 분리됨. 템플릿 저장은
+// 지금 속한 주제도 목록에 포함시킴(같은 주제에 템플릿을 저장하는 것도 자연스러운 사용법이라 뺄 이유가 없음)
 
 async function openTemplateModal() {
   const topics = await window.api.getTopics();

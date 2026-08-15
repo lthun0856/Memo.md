@@ -1,5 +1,6 @@
 let settings = null;
 let topics = [];
+let categories = [];
 let memos = [];
 let expandedTopicIds = new Set(); // 펼쳐진 주제 목록(여러 개 동시에 펼칠 수 있음)
 let showHidden = false;
@@ -9,6 +10,9 @@ let hiddenTopics = new Set(); // 표시 전용(클릭 동작 없음) — 대시�
 let visibleMemoIds = new Set(); // 표시 전용 — 지금 화면에 실제로 보이는 메모 id 목록(목록 항목별 눈 아이콘에 씀)
 let pinnedTopics = new Set();
 let screenWorkArea = { width: 1280, height: 800 }; // 화면 크기(자동조절 상한 계산용, 실제 값은 로드시 받아옴
+// (1.8.16 신규) 위젯이 모니터 아래쪽에 있으면 대시보드가 위로 펼쳐지게 하는 기능 —
+// main.js가 위젯 위치를 기준으로 계산해서 알려주는 값을 그대로 반영만 함('top'|'bottom')
+let widgetVerticalAnchor = 'top';
 const clickTimers = new Map(); // topicId -> timeout id
 
 const els = {
@@ -16,6 +20,7 @@ const els = {
   titlebar: document.getElementById('titlebar'),
   iconRow: document.getElementById('iconRow'),
   collapsedIcons: document.getElementById('collapsedIcons'),
+  categoryToggleRow: document.getElementById('categoryToggleRow'),
   dashboard: document.getElementById('dashboard'),
   btnSettings: document.getElementById('btnSettings'),
   btnSearch: document.getElementById('btnSearch'),
@@ -88,9 +93,10 @@ async function loadAll() {
   }
   loadAllInFlight = true;
   try {
-    const [s, t, m, hidden, visible, pinned, workArea, visState] = await Promise.all([
+    const [s, t, cats, m, hidden, visible, pinned, workArea, visState] = await Promise.all([
       window.api.getSettings(),
       window.api.getTopics(),
+      window.api.getCategories(),
       window.api.getAllMemos(),
       window.api.getHiddenTopics(),
       window.api.getVisibleMemoIds(),
@@ -100,11 +106,13 @@ async function loadAll() {
     ]);
     settings = s;
     topics = t;
+    categories = cats;
     memos = m;
     hiddenTopics = new Set(hidden);
     visibleMemoIds = new Set(visible);
     pinnedTopics = new Set(pinned);
     if (workArea && workArea.height) screenWorkArea = workArea;
+    applyVerticalAnchor(workArea && workArea.verticalAnchor);
     updateHideAllButton(visState); // 재시작 후에도 전체숨김 버튼이 실제 상태를 바로 반영하게 함
     applyWidgetState();
     render();
@@ -143,6 +151,7 @@ function eyeIconSvg(open) {
 function applyWidgetState() {
   els.widget.classList.toggle('collapsed', !!settings.widget.collapsed);
   els.widget.classList.toggle('handle-only', !!settings.widget.handleOnly);
+  els.widget.classList.toggle('handle-right', settings.widget.handlePosition === 'right');
   els.btnHandleOnly.title = settings.widget.handleOnly
     ? LANG.widget.handleOnlyToggleOff
     : LANG.widget.handleOnlyToggleOn;
@@ -159,16 +168,52 @@ function memosOfTopic(topicId) {
 }
 
 function visibleTopics() {
-  return showHidden ? topics : topics.filter((t) => !t.hidden);
+  const base = showHidden ? topics : topics.filter((t) => !t.hidden);
+  // (추가, 1.8.14) 카테고리 숨김버튼으로 숨긴 카테고리에 속한 주제는 topic.hidden과는
+  // 완전히 별개로 화면에서 뺌. "숨긴 주제 보기(showHidden, 위젯 상단 눈버튼)"를 켜도 이건
+  // 그대로 안 보임 — 두 숨김 기능이 서로 영향을 주면 안 된다는 확인에 따른 분리(1.8.14)
+  const hiddenCategories = categories.filter((c) => c.hidden);
+  if (hiddenCategories.length === 0) return base;
+  return base.filter((t) => !hiddenCategories.some((c) => t.name.startsWith(`${c.name}/`)));
 }
 
 function render() {
   renderIconRow();
   renderCollapsedIcons();
+  renderCategoryToggleRow();
   renderDashboard();
   renderHiddenToggle();
   requestAnimationFrame(syncHeight);
   requestAnimationFrame(syncCollapsedWidth);
+}
+
+// 주제버튼 줄과 주제 목록 사이: 등록된 카테고리 개수만큼 버튼을 만들어서(글자 없이 색상만)
+// 가운데서부터 배치함. 클릭하면 그 카테고리에 속한 주제("카테고리명/주제명") 전체를
+// 위젯에서 숨김/보임으로 한번에 토글함.
+// (변경, 1.8.14) 예전엔 주제관리의 "숨김" 체크(topic.hidden)를 여러 개 한번에 켜고 끄는
+// 방식이었는데, 그러면 위젯 상단 숨김버튼의 개수 표시나 주제목록의 숨김 표시(눈 아이콘)까지
+// 같이 바뀌어버려서 두 기능이 뒤섞이는 문제가 있었음. 그래서 지금은 topic.hidden을 전혀
+// 건드리지 않고, 카테고리 자신의 hidden 값(cat.hidden)만 보고 판단함 — 주제 목록쪽에는
+// 이 상태를 표시할 필요 없이(태훈님 확인) 이 버튼의 색칠 상태(all-hidden)로만 나타냄
+function renderCategoryToggleRow() {
+  const row = els.categoryToggleRow;
+  row.innerHTML = '';
+  categories.forEach((cat) => {
+    const allHidden = !!cat.hidden;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'category-toggle-btn' + (allHidden ? ' all-hidden' : '');
+    btn.style.background = cat.color || '#8A8574';
+    btn.title = fmt(LANG.widget.categoryToggleTitle, { name: cat.name });
+    btn.disabled = settingsOpen;
+    btn.addEventListener('click', async () => {
+      if (settingsOpen) return;
+      await window.api.setCategoryHidden(cat.name, !allHidden);
+      await loadAll();
+    });
+    row.appendChild(btn);
+  });
 }
 
 // collapsedMode=true(접힘 상태 타이틀바 안의 버튼)면 원클릭/더블클릭을 구분함:
@@ -512,6 +557,17 @@ async function runGestureAction(action, topicId) {
   }
 }
 
+// (1.8.16 신규) 위젯이 모니터 아래쪽에 있으면 대시보드가 위(상단바 방향이 아니라 화면 위쪽)로
+// 펼쳐지도록, 상단바(titlebar+iconRow+categoryToggleRow)와 대시보드의 화면상 위아래 순서를
+// 통째로 뒤집음(widget.css의 .widget.anchor-bottom { flex-direction: column-reverse }).
+// 실제로 창의 "어느 모서리를 고정한 채 늘어날지"는 main.js의 resizeWidgetKeepingAnchor가
+// 처리하고, 여기서는 그 결정값(main.js가 위젯 위치 기준으로 계산)에 맞춰 화면 순서만 맞춤
+function applyVerticalAnchor(anchor) {
+  if (anchor !== 'top' && anchor !== 'bottom') return; // 값이 없으면(구버전 등) 지금 상태 그대로 둠
+  widgetVerticalAnchor = anchor;
+  els.widget.classList.toggle('anchor-bottom', anchor === 'bottom');
+}
+
 // 위젯 세로 크기는 사용자가 직접 드래그로 조절할 수 없고(main.js에서 막음), 항상 지금
 // 화면에 보이는 내용(주제 수, 펼쳐진 메모 목록 등)에 맞춰 정확히 맞춤(늘어나기도, 줄어들기도 함)
 // (수정) 예전엔 바깥 #widget의 scrollHeight를 쟀는데, 목록 영역(#dashboard)이 자체
@@ -524,7 +580,8 @@ function syncHeight() {
   // (수정) '숨긴 주제 보기'를 titlebar 안(always-actions)으로 옮기면서 더 이상 대시보드
   // 아래에 따로 한 줄을 차지하지 않게 됨 — 이제 titlebar.offsetHeight 안에 이미 포함돼
   // 있으므로, 예전처럼 따로 더하면 그만큼(약 18px) 창이 매번 더 크게 계산되는 문제가 생김
-  const chromeHeight = els.titlebar.offsetHeight + els.iconRow.offsetHeight;
+  // categoryToggleRow는 카테고리가 하나도 없으면 :empty로 높이가 0이라 그냥 더해도 안전함
+  const chromeHeight = els.titlebar.offsetHeight + els.iconRow.offsetHeight + els.categoryToggleRow.offsetHeight;
   const desired = chromeHeight + els.dashboard.scrollHeight;
   const maxHeight = Math.max(220, screenWorkArea.height - 60); // 화면 위아래 여백 정도 남김
   const height = Math.min(Math.max(desired, 220), maxHeight);
@@ -697,6 +754,7 @@ window.api.onWidgetSizeChanged(({ width, height }) => {
 // 자동크기 한도를 새 모니터 기준으로 다시 계산해서, 옮긴 모니터가 더 작아도 그 범위 안에 맞춤
 window.api.onScreenWorkAreaChanged((workArea) => {
   if (workArea && workArea.height) screenWorkArea = workArea;
+  applyVerticalAnchor(workArea && workArea.verticalAnchor);
   syncHeight();
   syncCollapsedWidth();
 });

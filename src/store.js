@@ -23,7 +23,99 @@ const FILES = {
   // 휴지통: 삭제한 메모를 바로 지우지 않고 여기로 옮겨서 보관(설정 > 휴지통 탭에서 복구 가능).
   // 각 항목은 메모 원본 데이터 + deletedAt(삭제 시각). 보관기한 지난 항목은
   // main.js의 cleanupExpiredTrash()가 앱 시작할 때 자동으로 완전히 지움
-  trash: path.join(DATA_DIR, 'trash.json')
+  trash: path.join(DATA_DIR, 'trash.json'),
+  // 가계부: 달력의 가계부 모드에서 쓰는 지출 기록. 메모 데이터와 완전히 별개 파일(인계서 규칙).
+  // { categories: [{id,name,color}], entries: [{id,date:"YYYY-MM-DD",categoryId,amount,memo}],
+  //   settings: { payday, weeklyBudget, monthlyBudget, fixed, fixedApplied } }
+  ledger: path.join(DATA_DIR, 'ledger.json'),
+  // 공휴일 캐시(연도별). 특일정보 API 응답을 저장해둠 — 지난 연도는 다시 안 바뀌니 그대로 재사용,
+  // 올해/미래 연도만 main.js에서 주기적으로 다시 확인(임시공휴일이 뒤늦게 생기는 경우 대비)
+  holidays: path.join(DATA_DIR, 'holidays.json'),
+  // 가계부 위트 멘트 문구 모음. 태훈님이 메모장으로 열어 직접 추가·수정할 수 있게 별도 파일로
+  // 분리함(앱 재시작하면 반영). 파일이 없거나 깨져 있으면 기본 멘트로 자동 복구됨.
+  ments: path.join(DATA_DIR, '멘트.json')
+};
+
+// 가계부 기본 분류(처음 쓸 때 자동으로 채워짐. 설정에서 이름·색 수정, 추가·삭제 가능)
+const DEFAULT_LEDGER_CATEGORIES = [
+  { id: 'food',      name: '식비',       color: '#D65A5A' },
+  { id: 'transport', name: '교통',       color: '#4A73C4' },
+  { id: 'living',    name: '생활',       color: '#7FA65A' },
+  { id: 'culture',   name: '문화·여가',  color: '#9B6BC4' },
+  { id: 'health',    name: '의료·건강',  color: '#46A5A5' },
+  { id: 'etc',       name: '기타',       color: '#8A8577' }
+];
+
+// 가계부 설정 기본값(ledger.json 안의 settings — settings.json이 아니라 ledger에 두는 이유:
+// 백업 보호장치가 ledger.json을 통째로 복사하므로 예산·고정지출도 자동으로 백업됨)
+const DEFAULT_LEDGER_SETTINGS = {
+  payday: null,         // 월급날(1~31). null이면 기존처럼 1일~말일로 집계
+  weeklyBudget: null,   // 주간 예산(원). null이면 예산 기능 꺼짐
+  monthlyBudget: null,  // 월간 예산(원). null이면 예산 기능 꺼짐
+  fixed: [],            // 고정 지출 [{id, day(1~31), categoryId, amount, memo}]
+  fixedApplied: {}      // 고정 지출 중복 방지 표식 { "고정지출id:YYYY-MM": true }
+                        // (자동 기입된 걸 사용자가 지워도 다시 추가되지 않게 별도 보관)
+};
+
+// 위트 멘트 기본 문구(태훈님 승인 완료 30개 — CAL/인계서/인계서_달력_20260722.md).
+// 실제 표시는 데이터 폴더의 멘트.json에서 읽음. 여기는 파일이 없을 때 채워줄 원본.
+// {N} 은 표시 직전에 숫자로 바뀜(예: "지난주보다 {N}% 더 썼어요").
+const DEFAULT_MENTS = {
+  '_설명': '가계부 위트 멘트 파일입니다. 문구를 자유롭게 추가·수정하세요. 저장 후 앱을 재시작하면 반영됩니다. 각 상황의 목록에서 무작위로 하나가 표시됩니다. {N}은 자동으로 숫자로 바뀝니다. 파일이 깨지면 기본 문구로 자동 복구됩니다.',
+  '예산80': [
+    '예산 80% 돌파! 남은 건 통장의 눈물뿐 💸',
+    '슬슬 위험해요. 지갑이 다이어트 중',
+    '벌써 80%… 다 계획이 있으신 거죠?',
+    '아직 월급날은 멀었는데요…?',
+    '통장이 살려달래요'
+  ],
+  '예산100': [
+    '너 꿈이 거지야? 예산 초과!',
+    '축하합니다! 예산을 뚫으셨습니다 🎉 (기쁜 일 아님)',
+    '예산 초과! 이제부터 물은 셀프입니다',
+    '통장: 저 이만 퇴사하겠습니다',
+    '오늘부터 반찬은 김치 하나입니다',
+    '예산: 나 분명히 경고했다?'
+  ],
+  '예산150': [
+    '이쯤 되면 예산이 장식이죠?',
+    '카드가 뜨거워요. 소방서 부를까요? 🚒',
+    '혹시 로또 되셨어요? 아니면 멈추세요',
+    '이 속도면 다음달 예산도 이번달에 다 씁니다'
+  ],
+  '비교_지난주': ['지난주보다 {N}% 더 썼어요. 성장이 빠르시네요(?)'],
+  '비교_지난달': ['지난달 총액을 벌써 넘었어요. 신기록 달성 🏆'],
+  '문화부족': [
+    '문화생활 좀 하고 살아라… 인생이 노잼이야',
+    '이번달 문화·여가 0원. 일만 하다 죽을 셈이야?'
+  ],
+  '문화과다': [
+    '제정신이니? 지금 문화·여가에 이만큼 쓰는 게 맞아?',
+    '노는 게 제일 좋아~ 는 뽀로로만 가능합니다'
+  ],
+  '하루5건': [
+    '오늘 카드 좀 쉬게 해주세요…',
+    '손가락보다 카드가 바빴던 하루'
+  ],
+  '하루큰지출': [
+    '하루만에 이걸요? 대담하시네요',
+    '오늘 하루가 일주일치를 먹었어요'
+  ],
+  '무지출복귀': [
+    '오랜만이에요! 그동안 뭐 드시고 살았어요?',
+    '3일 무지출 성공! …이었는데 아쉽네요'
+  ],
+  '절약왕': [
+    '이번달 절약왕 👑 통장이 웃고 있어요',
+    '예산의 반도 안 씀. 혹시 로봇이세요?'
+  ],
+  '식비과다': [
+    '먹는 게 남는 거긴 한데… 너무 남기고 있어요'
+  ],
+  '월급날미정': [
+    '나한테 월급 언제인지 비밀로 하고 가계부가 정상적으로 돌아갈 거 같아?',
+    '월급날을 알려줘야 진짜 한 달 계산이 됩니다. ⚙설정에서 정해주세요'
+  ]
 };
 
 const DEFAULT_SETTINGS = {
@@ -36,6 +128,9 @@ const DEFAULT_SETTINGS = {
   hasSeenImageResizeNotice: false, // 이미지 자동 리사이즈 안내를 이미 봤는지 (첫 이미지 삽입 때 한 번만 안내)
   seedDataCreated: false, // 최초 실행시 예시 주제/메모를 이미 만들어놨는지 (한번 만들면 다시 안 만듦)
   opacity: 100, // 위젯+모든 메모창 공통 투명도 (100 = 불투명)
+  // 앱 전체 글씨체(윈도우에 설치된 글씨체 이름). 비어있으면 지금까지와 동일한 기본 글씨체 사용.
+  // 각 창의 css가 var(--app-font, 기본값) 을 쓰고, renderer/common/appFont.js가 이 값을 넣어줌
+  fontFamily: '',
   widget: {
     autoResize: true,
     width: 260,
@@ -43,6 +138,7 @@ const DEFAULT_SETTINGS = {
     alwaysOnTop: true,
     collapsed: false,
     handleOnly: false, // 접힘 상태에서 손잡이(⠿)만 남기고 더 축소했는지 (기존 사용자는 저장된 값이 없어도 undefined→false로 동일하게 동작함)
+    handlePosition: 'left', // 접힘 상태 손잡이+완전축소버튼 위치 'left'|'right' (기존 사용자는 undefined→'left'로 지금까지와 동일하게 동작함)
     // 펼친 상태의 "진짜" 가로 크기. 접힘 상태에서는 주제 버튼 개수에 맞춰 width가 자동으로
     // 늘고 줄어드는데(위젯 접힘/펼침 가로 자동확장 기능), 그 임시 값이 펼친 상태의 폭까지
     // 덮어써버리지 않도록 height/expandedHeight와 똑같은 방식으로 분리해서 따로 저장함
@@ -51,6 +147,18 @@ const DEFAULT_SETTINGS = {
     titlebarColor: '#2B2820', // 위젯 상단바 색상
     x: null, // 마지막 위젯 위치 (null이면 최초 기본 위치 사용)
     y: null
+  },
+  // 달력 창(바탕화면 달력). 위치/크기를 저장해 다음 실행시 복원. null이면 화면 중앙에서 시작.
+  calendar: {
+    x: null,
+    y: null,
+    width: 340,
+    height: 360,
+    weekStart: 'sun', // 주 시작 요일: 'sun'(일요일) | 'mon'(월요일)
+    showLunar: true,  // 달력에 음력 날짜 표시 여부
+    bgColor: '#F7F4EC', // 달력 배경색
+    opacity: 100,        // 달력 전용 투명도(30~100, 전체 투명도와 별개)
+    holidayApiKey: ''   // 공휴일(특일정보) API 인증키 — 태훈님이 ⚙설정에서 직접 입력. 비우면 공휴일 기능 꺼짐
   },
   clickGesture: {
     single: 'list',    // 'list' | 'expandAll'
@@ -205,6 +313,67 @@ module.exports = {
       writeJson(FILES.exportLog, deduped);
     }
     return deduped;
+  },
+  // 가계부: 파일이 없거나 분류가 비어 있으면 기본 분류를 채워서 돌려줌
+  getLedger() {
+    const raw = readJson(FILES.ledger, null);
+    const ledger = raw && typeof raw === 'object' ? raw : {};
+    if (!Array.isArray(ledger.categories) || !ledger.categories.length) {
+      ledger.categories = DEFAULT_LEDGER_CATEGORIES.map((c) => ({ ...c }));
+    }
+    if (!Array.isArray(ledger.entries)) ledger.entries = [];
+    // 가계부 설정 방어코드: 없거나 이상한 값이면 기본값으로(기존 사용자 파일에도 안전)
+    const s = (ledger.settings && typeof ledger.settings === 'object') ? ledger.settings : {};
+    const num = (v, lo, hi) => {
+      const n = Math.floor(Number(v));
+      return Number.isFinite(n) && n >= lo && (hi == null || n <= hi) ? n : null;
+    };
+    ledger.settings = {
+      payday: num(s.payday, 1, 31),
+      weeklyBudget: num(s.weeklyBudget, 1, null),
+      monthlyBudget: num(s.monthlyBudget, 1, null),
+      fixed: Array.isArray(s.fixed) ? s.fixed : [],
+      fixedApplied: (s.fixedApplied && typeof s.fixedApplied === 'object') ? s.fixedApplied : {}
+    };
+    return ledger;
+  },
+  // 위트 멘트: 멘트.json을 읽어서 돌려줌. 파일이 없으면 기본 멘트로 만들어줌.
+  // 있더라도 특정 상황의 목록이 빠졌거나 비어 있으면 그 상황만 기본 문구로 채움
+  // (사용자가 수정한 다른 문구는 그대로 유지 — 파일에 다시 쓰지는 않음)
+  getMents() {
+    const raw = readJson(FILES.ments, null);
+    if (!raw || typeof raw !== 'object') {
+      try { writeJson(FILES.ments, DEFAULT_MENTS); } catch (e) { /* 못 만들어도 기본값으로 동작 */ }
+      return { ...DEFAULT_MENTS };
+    }
+    const merged = {};
+    Object.keys(DEFAULT_MENTS).forEach((key) => {
+      const list = raw[key];
+      merged[key] = (Array.isArray(list) && list.filter((t) => typeof t === 'string' && t.trim()).length)
+        ? list.filter((t) => typeof t === 'string' && t.trim())
+        : DEFAULT_MENTS[key];
+    });
+    return merged;
+  },
+  saveLedger(ledger) {
+    writeJson(FILES.ledger, ledger);
+    return ledger;
+  },
+  // 공휴일 캐시: { "2026": { fetchedAt: "ISO시각", days: { "YYYY-MM-DD": "이름" } }, ... }
+  getHolidayCache() {
+    const raw = readJson(FILES.holidays, {});
+    return (raw && typeof raw === 'object') ? raw : {};
+  },
+  saveHolidayYear(year, days) {
+    const cache = this.getHolidayCache();
+    cache[year] = { fetchedAt: new Date().toISOString(), days: days || {} };
+    writeJson(FILES.holidays, cache);
+    return cache[year];
+  },
+  // 백업용: 데이터 파일의 실제 경로를 돌려줌(예: 'ledger' → .../data/ledger.json).
+  // md 백업만으로는 일정 날짜·알람·가계부가 복구되지 않아서, 백업 때 원본 JSON도 같이 복사함
+  getDataFilePath(key) {
+    return FILES[key] || null;
   },
   addExportLogEntry(entry) {
     const log = readJson(FILES.exportLog, []);

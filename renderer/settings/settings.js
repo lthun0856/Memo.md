@@ -27,11 +27,18 @@ const els = {
   widgetAutoResize: document.getElementById('widgetAutoResize'),
   widgetWidth: document.getElementById('widgetWidth'),
   widgetHeight: document.getElementById('widgetHeight'),
+  handlePositionLeft: document.getElementById('handlePositionLeft'),
+  handlePositionRight: document.getElementById('handlePositionRight'),
   gestureSingle: document.getElementById('gestureSingle'),
   gestureDouble: document.getElementById('gestureDouble'),
   widgetTitlebarColor: document.getElementById('widgetTitlebarColor'),
   opacityRange: document.getElementById('opacityRange'),
   opacityValue: document.getElementById('opacityValue'),
+  fontFamily: document.getElementById('fontFamily'),
+  fontFamilyCustom: document.getElementById('fontFamilyCustom'),
+  fontCustomRow: document.getElementById('fontCustomRow'),
+  fontCustomHint: document.getElementById('fontCustomHint'),
+  fontPreview: document.getElementById('fontPreview'),
   newMemoShortcutInput: document.getElementById('newMemoShortcutInput'),
   btnClearShortcut: document.getElementById('btnClearShortcut'),
   btnExportAll: document.getElementById('btnExportAll'),
@@ -56,6 +63,7 @@ const els = {
   specialCharInputs: document.getElementById('specialCharInputs'),
   categoryList: document.getElementById('categoryList'),
   newCategoryName: document.getElementById('newCategoryName'),
+  newCategoryColor: document.getElementById('newCategoryColor'),
   btnAddCategory: document.getElementById('btnAddCategory'),
   categoryNameError: document.getElementById('categoryNameError'),
   trashList: document.getElementById('trashList'),
@@ -64,17 +72,22 @@ const els = {
   newTopicName: document.getElementById('newTopicName'),
   newTopicDesc: document.getElementById('newTopicDesc'),
   newTopicDefaultTitle: document.getElementById('newTopicDefaultTitle'),
+  newTopicSkipTitle: document.getElementById('newTopicSkipTitle'),
+  newTopicUseCalendar: document.getElementById('newTopicUseCalendar'),
   topicNameError: document.getElementById('topicNameError'),
   newTopicParent: document.getElementById('newTopicParent'),
   newTopicChar: document.getElementById('newTopicChar'),
   newTopicColor: document.getElementById('newTopicColor'),
   newTopicTextColor: document.getElementById('newTopicTextColor'),
   newTopicMemoColor: document.getElementById('newTopicMemoColor'),
+  copyColorBtns: document.querySelectorAll('.copy-color-btn'),
+  pasteColorBtns: document.querySelectorAll('.paste-color-btn'),
   btnAddTopic: document.getElementById('btnAddTopic'),
   btnSave: document.getElementById('btnSave'),
   btnApply: document.getElementById('btnApply'),
   btnCancel: document.getElementById('btnCancel'),
   saveStatus: document.getElementById('saveStatus'),
+  appVersionLabel: document.getElementById('appVersionLabel'),
   tabBtns: document.querySelectorAll('.tab-btn'),
   tabPanels: document.querySelectorAll('.tab-panel'),
   confirmModal: document.getElementById('confirmModal'),
@@ -114,6 +127,7 @@ function applyLang() {
   document.getElementById('topicMdTipHint').innerHTML = T.mdTipHint;
   document.getElementById('categoryFieldLabel').textContent = T.categoryFieldLabel;
   els.newCategoryName.placeholder = T.newCategoryPlaceholder;
+  els.newCategoryColor.title = T.categoryColorTitle;
   els.btnAddCategory.textContent = T.addCategoryButton;
   document.getElementById('topicEditNameHint').textContent = T.editNameHint;
   document.getElementById('newTopicParentLabel').textContent = T.parentFieldLabel;
@@ -123,11 +137,21 @@ function applyLang() {
   els.newTopicDesc.placeholder = T.descPlaceholder;
   document.getElementById('newTopicDefaultTitleLabel').textContent = T.defaultTitleFieldLabel;
   els.newTopicDefaultTitle.placeholder = T.defaultTitlePlaceholder;
+  document.getElementById('newTopicSkipTitleLabel').textContent = T.skipTitleLabel;
+  document.getElementById('newTopicUseCalendarLabel').textContent = T.useCalendarLabel;
   document.getElementById('newTopicCharLabel').textContent = T.charFieldLabel;
   els.newTopicChar.placeholder = T.charPlaceholder;
   document.getElementById('newTopicColorLabel').textContent = T.iconBgLabel;
   document.getElementById('newTopicTextColorLabel').textContent = T.iconTextLabel;
   document.getElementById('newTopicMemoColorLabel').textContent = T.memoBgLabel;
+  els.copyColorBtns.forEach((btn) => {
+    btn.textContent = T.copyColorButton;
+    btn.title = T.copyColorTitle;
+  });
+  els.pasteColorBtns.forEach((btn) => {
+    btn.textContent = T.pasteColorButton;
+    btn.title = T.pasteColorTitle;
+  });
   els.btnAddTopic.textContent = T.addTopicButton;
 
   const G = S.general;
@@ -141,6 +165,12 @@ function applyLang() {
   els.btnClearShortcut.textContent = G.shortcutClearButton;
   document.getElementById('opacityHeading').textContent = G.opacityHeading;
   document.getElementById('opacityHint').textContent = G.opacityHint;
+  document.getElementById('fontHeading').textContent = G.fontHeading;
+  document.getElementById('fontHint').textContent = G.fontHint;
+  els.fontCustomHint.textContent = G.fontCustomHint;
+  els.fontFamilyCustom.placeholder = G.fontCustomPlaceholder;
+  els.fontPreview.textContent = G.fontPreviewText;
+  // 달력·가계부 설정 문구는 달력창 ⚙️로 이동함(그쪽은 한글 하드코딩 — 달력창은 ko.js를 안 씀)
   document.getElementById('backupHeading').textContent = G.backupHeading;
   document.getElementById('backupHint1').textContent = G.backupHint1;
   els.btnExportAll.textContent = G.exportAllButton;
@@ -169,6 +199,10 @@ function applyLang() {
   document.getElementById('widgetAutoResizeLabel').textContent = W.autoResizeLabel;
   document.getElementById('widgetWidthLabel').textContent = W.widthLabel;
   document.getElementById('widgetHeightLabel').textContent = W.heightLabel;
+  document.getElementById('widgetHandlePositionGroupLabel').textContent = W.handlePositionGroupLabel;
+  document.getElementById('handlePositionLeftLabel').textContent = W.handlePositionLeftLabel;
+  document.getElementById('handlePositionRightLabel').textContent = W.handlePositionRightLabel;
+  document.getElementById('handlePositionHint').textContent = W.handlePositionHint;
   document.getElementById('widgetGestureGroupLabel').textContent = W.gestureGroupLabel;
   document.getElementById('widgetSingleClickLabel').textContent = W.singleClickLabel;
   document.getElementById('widgetDoubleClickLabel').textContent = W.doubleClickLabel;
@@ -245,16 +279,21 @@ function fillGestureOptions(selectEl, current) {
 }
 
 async function loadAll() {
-  [settings, topics, categories, trash] = await Promise.all([
+  let appVersion;
+  [settings, topics, categories, trash, appVersion] = await Promise.all([
     window.api.getSettings(),
     window.api.getTopics(),
     window.api.getCategories(),
-    window.api.getTrash()
+    window.api.getTrash(),
+    window.api.getAppVersion()
   ]);
   fillForm();
   renderCategories();
   renderTopics();
   renderTrash();
+  // (1.8.16 신규) "빌드해서 설치한 버전"과 "지금 손보고 있는 소스"가 헷갈리지 않도록,
+  // 설정창 아래에 지금 실행 중인 버전을 작게 표시(예전엔 확인할 방법이 아예 없었음)
+  if (appVersion) els.appVersionLabel.textContent = `v${appVersion}`;
 }
 
 function fillForm() {
@@ -270,13 +309,14 @@ function fillForm() {
   els.widgetHeight.value = settings.widget.height;
   els.widgetWidth.disabled = settings.widget.autoResize;
   els.widgetHeight.disabled = settings.widget.autoResize;
+  (settings.widget.handlePosition === 'right' ? els.handlePositionRight : els.handlePositionLeft).checked = true;
   fillGestureOptions(els.gestureSingle, settings.clickGesture.single);
   fillGestureOptions(els.gestureDouble, settings.clickGesture.double);
   els.widgetTitlebarColor.value = settings.widget.titlebarColor || '#2B2820';
   const opacity = typeof settings.opacity === 'number' ? settings.opacity : 100;
   els.opacityRange.value = opacity;
   els.opacityValue.textContent = `${opacity}%`;
-
+  fillFontOptions(settings.fontFamily);
   els.newMemoShortcutInput.value = settings.newMemoShortcut || '';
 
   els.mdFeatureEnabled.checked = settings.mdFeatureEnabled !== false;
@@ -332,6 +372,127 @@ els.specialCharCount.addEventListener('input', () => {
 els.opacityRange.addEventListener('input', () => {
   els.opacityValue.textContent = `${els.opacityRange.value}%`;
 });
+
+
+// ---- 앱 전체 글씨체 ----
+// 윈도우에 어떤 글씨체가 깔려 있는지 알려주는 기능이 따로 없어서, 자주 쓰는 후보 목록을
+// 놓고 "이 컴퓨터에 진짜 있는지"를 하나씩 재보는 방식으로 목록을 만듦(아래 isFontInstalled).
+// 목록에 없는 글씨체는 "직접 입력…"으로 이름을 적어서 쓸 수 있음.
+const FONT_CUSTOM = '__custom__';
+const FONT_CANDIDATES = [
+  { value: 'Malgun Gothic', label: '맑은 고딕' },
+  { value: 'Gulim', label: '굴림' },
+  { value: 'Dotum', label: '돋움' },
+  { value: 'Batang', label: '바탕' },
+  { value: 'Gungsuh', label: '궁서' },
+  { value: 'NanumGothic', label: '나눔고딕' },
+  { value: 'NanumBarunGothic', label: '나눔바른고딕' },
+  { value: 'NanumMyeongjo', label: '나눔명조' },
+  { value: 'NanumSquare', label: '나눔스퀘어' },
+  { value: 'NanumSquareRound', label: '나눔스퀘어라운드' },
+  { value: 'Nanum Pen Script', label: '나눔손글씨 펜' },
+  { value: 'Noto Sans KR', label: '본고딕 (Noto Sans KR)' },
+  { value: 'Noto Serif KR', label: '본명조 (Noto Serif KR)' },
+  { value: 'Pretendard', label: 'Pretendard' },
+  { value: 'Spoqa Han Sans Neo', label: 'Spoqa Han Sans Neo' },
+  { value: 'HCR Dotum', label: '함초롬돋움' },
+  { value: 'HCR Batang', label: '함초롬바탕' },
+  { value: 'KoPubDotum Medium', label: 'KoPub 돋움' },
+  { value: 'KoPubBatang Medium', label: 'KoPub 바탕' },
+  { value: 'Segoe UI', label: 'Segoe UI (영문)' },
+  { value: 'Arial', label: 'Arial (영문)' },
+  { value: 'Times New Roman', label: 'Times New Roman (영문)' },
+  { value: 'Consolas', label: 'Consolas (고정폭)' },
+  { value: 'D2Coding', label: 'D2Coding (고정폭)' }
+];
+
+// 글씨체가 설치돼 있는지 재는 방법: 같은 글자를 "기준 글씨체"로 그렸을 때와
+// "찾는 글씨체 → 실패하면 기준 글씨체"로 그렸을 때의 가로 길이를 비교함.
+// 길이가 다르면 찾는 글씨체가 실제로 쓰인 것이므로 설치돼 있다는 뜻.
+// (찾는 글씨체가 기준 글씨체와 우연히 폭이 완전히 같으면 못 찾을 수 있는데, 그 경우엔
+//  "직접 입력…"으로 쓰면 되므로 문제되지 않음)
+function makeFontDetector() {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return () => true; // 측정을 못 하는 환경이면 그냥 전부 보여줌
+  const SAMPLE = '가나다라ABCDabcd0123';
+  const SIZE = '72px';
+  const BASES = ['monospace', 'serif', 'sans-serif'];
+  const baseWidth = {};
+  BASES.forEach((base) => {
+    ctx.font = `${SIZE} ${base}`;
+    baseWidth[base] = ctx.measureText(SAMPLE).width;
+  });
+  return function isFontInstalled(name) {
+    return BASES.some((base) => {
+      ctx.font = `${SIZE} "${name}", ${base}`;
+      return ctx.measureText(SAMPLE).width !== baseWidth[base];
+    });
+  };
+}
+
+let fontOptionsFilled = false;
+function fillFontOptions(savedFont) {
+  const G = LANG.settings.general;
+  if (!fontOptionsFilled) {
+    const isFontInstalled = makeFontDetector();
+    const optDefault = document.createElement('option');
+    optDefault.value = '';
+    optDefault.textContent = G.fontDefaultLabel;
+    els.fontFamily.appendChild(optDefault);
+
+    FONT_CANDIDATES.forEach((f) => {
+      if (!isFontInstalled(f.value)) return;
+      const opt = document.createElement('option');
+      opt.value = f.value;
+      opt.textContent = f.label;
+      opt.style.fontFamily = `"${f.value}"`; // 목록에서도 그 글씨체로 보이게
+      els.fontFamily.appendChild(opt);
+    });
+
+    const optCustom = document.createElement('option');
+    optCustom.value = FONT_CUSTOM;
+    optCustom.textContent = G.fontCustomLabel;
+    els.fontFamily.appendChild(optCustom);
+    fontOptionsFilled = true;
+  }
+
+  const saved = (savedFont || '').trim();
+  const inList = Array.from(els.fontFamily.options).some((o) => o.value === saved);
+  if (!saved) {
+    els.fontFamily.value = '';
+    els.fontFamilyCustom.value = '';
+  } else if (inList) {
+    els.fontFamily.value = saved;
+    els.fontFamilyCustom.value = '';
+  } else {
+    // 목록에 없는 이름이 저장돼 있으면(직접 입력했거나, 글씨체를 지운 경우) 직접입력 칸에 넣어줌
+    els.fontFamily.value = FONT_CUSTOM;
+    els.fontFamilyCustom.value = saved;
+  }
+  syncFontUi();
+}
+
+// 지금 화면에서 고른 글씨체 이름(저장될 값). 기본이면 빈 문자열
+function currentFontValue() {
+  if (els.fontFamily.value === FONT_CUSTOM) return els.fontFamilyCustom.value.trim();
+  return els.fontFamily.value;
+}
+
+// 직접입력 칸 보이기/숨기기 + 미리보기 글씨체 갱신
+function syncFontUi() {
+  const isCustom = els.fontFamily.value === FONT_CUSTOM;
+  els.fontCustomRow.hidden = !isCustom;
+  els.fontCustomHint.hidden = !isCustom;
+  const name = currentFontValue().replace(/["']/g, '');
+  els.fontPreview.style.fontFamily = name
+    ? `"${name}", -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif`
+    : '';
+}
+
+els.fontFamily.addEventListener('change', syncFontUi);
+els.fontFamilyCustom.addEventListener('input', syncFontUi);
+
 
 // ---- 단축키 입력 (키 조합을 눌러서 바로 Electron accelerator 문자열로 저장) ----
 
@@ -501,6 +662,18 @@ function renderCategories() {
     const item = document.createElement('div');
     item.className = 'category-item';
     item.innerHTML = `<span class="name">${escapeHtml(c.name)}</span>`;
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.className = 'category-color-input';
+    colorInput.value = c.color || '#8A8574';
+    colorInput.title = LANG.settings.topics.categoryColorTitle;
+    colorInput.addEventListener('change', async () => {
+      c.color = colorInput.value;
+      await window.api.updateCategory({ id: c.id, color: c.color });
+    });
+    item.prepend(colorInput);
+
     const delBtn = document.createElement('button');
     delBtn.className = 'del-btn';
     delBtn.title = LANG.settings.common.delete;
@@ -530,7 +703,7 @@ els.btnAddCategory.addEventListener('click', async () => {
     return;
   }
   els.categoryNameError.hidden = true;
-  const added = await window.api.addCategory({ name });
+  const added = await window.api.addCategory({ name, color: els.newCategoryColor.value });
   categories.push(added);
   renderCategories();
   els.newCategoryName.value = '';
@@ -602,6 +775,8 @@ function buildEditForm(topic) {
     <div class="row2">
       <label class="mini-label">${escapeHtml(T.memoBgLabel)} <input type="color" class="edit-memocolor" value="${topic.memoColor || topic.color || '#8A8574'}" /></label>
       <label class="mini-label"><input type="checkbox" class="edit-hidden" ${topic.hidden ? 'checked' : ''} /> ${escapeHtml(T.editHiddenLabel)}</label>
+      <label class="mini-label"><input type="checkbox" class="edit-skiptitle" ${topic.skipTitleFirst ? 'checked' : ''} /> ${escapeHtml(T.skipTitleLabel)}</label>
+      <label class="mini-label"><input type="checkbox" class="edit-usecalendar" ${topic.useCalendar ? 'checked' : ''} /> ${escapeHtml(T.useCalendarLabel)}</label>
     </div>
     <div class="row2 row2-actions">
       <button class="edit-cancel" type="button" style="background:#8A8574;">${escapeHtml(T.editCancelButton)}</button>
@@ -624,7 +799,9 @@ function buildEditForm(topic) {
       color: form.querySelector('.edit-color').value,
       textColor: form.querySelector('.edit-textcolor').value,
       memoColor: form.querySelector('.edit-memocolor').value,
-      hidden: form.querySelector('.edit-hidden').checked
+      hidden: form.querySelector('.edit-hidden').checked,
+      skipTitleFirst: form.querySelector('.edit-skiptitle').checked,
+      useCalendar: form.querySelector('.edit-usecalendar').checked
     };
     await window.api.updateTopic(updated);
     topics = await window.api.getTopics();
@@ -657,6 +834,8 @@ els.btnAddTopic.addEventListener('click', async () => {
     name,
     description: els.newTopicDesc.value.trim(),
     defaultTitle: els.newTopicDefaultTitle.value.trim(),
+    skipTitleFirst: els.newTopicSkipTitle.checked,
+    useCalendar: els.newTopicUseCalendar.checked,
     iconChar,
     color: els.newTopicColor.value,
     textColor: els.newTopicTextColor.value,
@@ -670,9 +849,71 @@ els.btnAddTopic.addEventListener('click', async () => {
   els.newTopicDesc.value = '';
   els.newTopicChar.value = '';
   els.newTopicDefaultTitle.value = '';
+  els.newTopicSkipTitle.checked = false;
+  els.newTopicUseCalendar.checked = true;
   els.newTopicParent.value = '';
 });
 els.newTopicName.addEventListener('input', () => { els.topicNameError.hidden = true; });
+
+// 색상칸(아이콘배경/아이콘글자/메모배경) 옆의 작은 "복사" 버튼: 그 칸에서 고른 색상 코드를
+// 클립보드로 복사해서, 다른 주제를 만들 때나 다른 곳에 그대로 붙여넣어 재사용할 수 있게 함
+els.copyColorBtns.forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const input = document.getElementById(btn.dataset.copyFor);
+    if (!input) return;
+    // (참고) 이 앱에서 클립보드 복사는 이미 검증된 window.api.copyText(메모 전체 복사에서 사용
+    // 중)로 통일함 — navigator.clipboard는 안 씀
+    const ok = await window.api.copyText(input.value);
+    if (!ok) return;
+    const original = btn.textContent;
+    btn.textContent = LANG.settings.topics.copyColorDoneButton;
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('copied');
+    }, 1200);
+  });
+});
+
+// 클립보드 텍스트가 "#RGB" 또는 "#RRGGBB" 형태(# 없어도 됨)의 색상 코드인지 확인하고,
+// <input type="color">가 요구하는 소문자 "#rrggbb" 형태로 맞춰서 돌려줌. 색상 코드가
+// 아니면 null을 돌려줘서 붙여넣기를 하지 않게 함
+function normalizeHexColor(text) {
+  const trimmed = (text || '').trim();
+  const m6 = /^#?([0-9A-Fa-f]{6})$/.exec(trimmed);
+  const m3 = /^#?([0-9A-Fa-f]{3})$/.exec(trimmed);
+  const hex = m6 ? m6[1] : (m3 ? m3[1].split('').map((c) => c + c).join('') : null);
+  return hex ? ('#' + hex.toLowerCase()) : null;
+}
+
+// 색상칸 옆의 "붙여넣기" 버튼: 다른 색상칸에서 복사해둔(또는 클립보드에 있는) 색상 코드를
+// 이 칸에 그대로 적용함. 스포이드로 매번 새로 고르지 않고 이미 고른 색을 재사용하려는 목적.
+// 색상 코드가 아닌 텍스트가 복사돼 있으면 적용하지 않고 버튼에 "색상 아님"만 잠깐 표시함
+els.pasteColorBtns.forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const input = document.getElementById(btn.dataset.pasteFor);
+    if (!input) return;
+    const clipboardText = await window.api.pasteText();
+    const hex = normalizeHexColor(clipboardText);
+    const original = btn.textContent;
+    if (!hex) {
+      btn.textContent = LANG.settings.topics.pasteColorInvalidButton;
+      btn.classList.add('paste-invalid');
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('paste-invalid');
+      }, 1200);
+      return;
+    }
+    input.value = hex;
+    btn.textContent = LANG.settings.topics.pasteColorDoneButton;
+    btn.classList.add('pasted');
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.classList.remove('pasted');
+    }, 1200);
+  });
+});
 
 // ---- 휴지통 ----
 function formatDate(iso) {
@@ -777,6 +1018,7 @@ function buildSettingsPayload() {
     multiMode: els.multiMode.checked,
     confirmMemoDelete: els.confirmMemoDelete.checked,
     opacity: Number(els.opacityRange.value) || 100,
+    fontFamily: currentFontValue(),
     newMemoShortcut: els.newMemoShortcutInput.value || '',
     defaultPostSaveAction: els.postSaveDelete.checked ? 'delete' : 'keep',
     widget: {
@@ -787,7 +1029,8 @@ function buildSettingsPayload() {
       // 여기서 새로 입력한 값이 다음에 펼칠 때 무시되고 예전 값으로 되돌아가버림
       expandedWidth: Number(els.widgetWidth.value) || 260,
       expandedHeight: Number(els.widgetHeight.value) || 360,
-      titlebarColor: els.widgetTitlebarColor.value
+      titlebarColor: els.widgetTitlebarColor.value,
+      handlePosition: els.handlePositionRight.checked ? 'right' : 'left'
     },
     clickGesture: {
       single: els.gestureSingle.value,
@@ -808,12 +1051,17 @@ function buildSettingsPayload() {
       folderPath: els.autoBackupFolder.value,
       intervalHours: Number(els.autoBackupInterval.value) || 0
     }
+    // 달력(calendar) 설정은 여기서 안 보냄 — 달력창 ⚙️에서 'calendar:saveSettings'로 저장함.
+    // main.js settings:save가 calendar를 기존 값과 병합하므로, 안 보내면 그대로 유지됨
   };
 }
 
 async function doSave() {
   const updated = buildSettingsPayload();
   settings = await window.api.saveSettings(updated);
+  // 설정창 자신에게는 settings:updated 신호가 안 오므로(main.js는 위젯/메모/달력에만 보냄)
+  // 여기서 직접 글씨체를 다시 적용해서 저장하자마자 바로 보이게 함
+  if (typeof window.applyAppFont === 'function') window.applyAppFont(settings.fontFamily);
   return settings;
 }
 
@@ -832,5 +1080,7 @@ els.btnApply.addEventListener('click', async () => {
 
 // 취소: 저장하지 않고 그냥 창만 닫음(바꾼 내용은 버려짐)
 els.btnCancel.addEventListener('click', () => window.close());
+
+// (가계부 분류 관리는 달력창 ⚙️로 이동함 — 태훈님 요청 2026-07-24)
 
 loadAll();

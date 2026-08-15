@@ -287,3 +287,6 @@ html, body {
 }
 .nav-btn.ghost:hover { background: rgba(0,0,0,0.05); }
 .nav-btn.ghost:disabled { visibility: hidden; }
+
+/* 앱 전체 글씨체(설정 > 글씨체). 안 골랐으면 기본값 그대로 */
+body { font-family: var(--app-font, -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif); }

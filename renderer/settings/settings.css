@@ -1,7 +1,7 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif;
+  font-family: var(--app-font, -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif);
   background: #F5F3EC;
   color: #111111;
   scrollbar-width: thin;
@@ -51,6 +51,8 @@ h2 {
 .tab-panel section:first-of-type h2 { margin-top: 0; }
 
 .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+/* hidden 속성이 붙은 줄은 확실히 감춤 — display:flex가 hidden보다 우선이라 이 규칙이 없으면 안 숨겨짐 */
+.row[hidden] { display: none; }
 .row input[type="text"] { flex: 1; }
 .row label { font-size: 12px; color: #111111; display: flex; align-items: center; gap: 6px; }
 
@@ -117,7 +119,7 @@ button:hover { opacity: 0.85; }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px 4px 10px;
+  padding: 4px 6px 4px 6px;
   border: 1px solid #D8D2BC;
   border-radius: 14px;
   background: #fff;
@@ -125,6 +127,15 @@ button:hover { opacity: 0.85; }
 }
 .category-item .name { color: #111111; }
 .category-item .del-btn { background: transparent; color: #B24A3B; padding: 1px 5px; font-size: 13px; }
+.category-color-input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid #D8D2BC;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+}
 
 .topic-list { margin-bottom: 10px; }
 .topic-item {
@@ -205,8 +216,33 @@ button:hover { opacity: 0.85; }
 .field-color-group {
   display: flex;
   gap: 12px;
+  align-items: center;
   flex-wrap: wrap;
 }
+.color-copy-pair { display: flex; align-items: center; gap: 3px; }
+.copy-color-btn {
+  font-size: 10px;
+  padding: 2px 6px;
+  border: 1px solid #D8D2BC;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  color: #4A4739;
+}
+.copy-color-btn:hover { background: #F2EFE3; }
+.copy-color-btn.copied { background: #E7E2CC; color: #221F17; }
+.paste-color-btn {
+  font-size: 10px;
+  padding: 2px 6px;
+  border: 1px solid #D8D2BC;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  color: #4A4739;
+}
+.paste-color-btn:hover { background: #F2EFE3; }
+.paste-color-btn.pasted { background: #E7E2CC; color: #221F17; }
+.paste-color-btn.paste-invalid { background: #F6DEDA; color: #8A2E1E; }
 .topic-form input[type="text"] { min-width: 0; }
 .char-input { width: 70px !important; text-align: center; }
 
@@ -272,6 +308,9 @@ body.md-disabled .md-feature-only { display: none; }
   gap: 10px;
 }
 #saveStatus { font-size: 11px; color: #4A4739; }
+/* (1.8.16 신규) 지금 실행 중인 버전 번호를 작게 표시 — 태훈님이 설치파일을 새로 만들어
+   실행한 게 맞는지 화면에서 바로 확인할 수 있게(예전엔 앱 안에 버전 표시가 아예 없었음) */
+.app-version-label { font-size: 10px; color: #A39C87; margin-right: auto; }
 .save-btn { padding: 8px 18px; }
 .cancel-btn { background: transparent; color: #4A4739; border: 1px solid #D8D2BC; }
 .cancel-btn:hover { background: rgba(0,0,0,0.05); opacity: 1; }
@@ -303,3 +342,16 @@ body.md-disabled .md-feature-only { display: none; }
 .modal-btn-cancel:hover { background: rgba(0,0,0,0.1); }
 .modal-btn-confirm { background: #29271F; color: #fff; }
 .modal-btn-confirm:hover { opacity: 0.85; }
+
+/* 글씨체 미리보기 상자 — 고른 글씨체가 실제로 어떻게 보이는지 바로 확인용 */
+.font-preview {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0,0,0,0.14);
+  border-radius: 6px;
+  background: #FBFAF5;
+  color: #211F1A;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-line;
+}

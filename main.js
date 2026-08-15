@@ -1,8 +1,16 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, screen, clipboard, globalShortcut, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, screen, clipboard, globalShortcut, nativeImage, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 const store = require('./src/store');
+const {
+  needsChecklistMigration,
+  buildContentWithChecklist,
+  needsTableMigration,
+  buildContentWithTables,
+  needsImageMigration,
+  buildContentWithImages,
+} = require('./src/migrate');
 const {
   exportMemoToObsidian,
   exportAsTxt,
@@ -44,11 +52,21 @@ const ATTACH_DIR = () => {
 
 let tray = null;
 let widgetWindow = null;
+// (1.8.16 신규) 위젯 세로 자동크기조절시 어느 모서리를 고정할지('top'=기존처럼 위쪽 고정,
+// 아래로 늘어남 | 'bottom'=아래쪽 고정, 위로 늘어남). 위젯을 만들 때/옮길 때만 다시 계산하고
+// (아래 computeWidgetVerticalAnchor 참고), 내용물 크기 때문에 창이 늘고 줄 때는 다시 계산하지
+// 않음 — 매번 다시 계산하면 화면 중간쯤에서 창이 커지는 도중에 위/아래 기준이 갑자기 바뀌어
+// 버릴 수 있어서(위쪽 남은 공간과 아래쪽 남은 공간이 커지는 도중 역전됨), 사용자가 위젯을
+// "옮길 때"만 다시 판단하도록 함
+let widgetVerticalAnchor = 'top';
 let settingsWindow = null;
+let calendarWindow = null; // 바탕화면 달력 창(메모앱과 데이터 공유하는 별도 창)
 let welcomeWindow = null;
 let memoLinkWindow = null; // "메모 연결" 검색 팝업(메모지 크기에 안 갇히게 별도 작은 창으로 뜸)
 let memoLinkTargetMemoId = null; // 팝업에서 고른 링크를 어느 메모창에 꽂아줄지 기억해둠
 let searchWindow = null; // 위젯 🔍 검색 팝업(메모 연결 팝업과 같은 방식의 별도 작은 창)
+let moveTopicWindow = null; // "다른 주제로 이동" 팝업(메모지 안에 갇혀 있던 걸 메모 연결 팝업과 같은 방식으로 분리함)
+let moveTopicTargetMemoId = null; // 팝업에서 고른 주제를 어느 메모창에 반영할지 기억해둠
 const memoWindows = new Map(); // memoId -> BrowserWindow
 // (변경) 예전엔 전체숨김/주제숨김 상태가 메모리에만 있어서 재시작하면 무조건 초기화됐고,
 // 부팅 후 일부러 숨겨둔 메모까지 전부 다시 켜지는 불편이 있었음(태훈님 요청으로 영구 저장으로 전환).
@@ -125,14 +143,22 @@ function createMemoWindow(memo, options = {}) {
     icon: ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true
+      contextIsolation: true,
+      // 체크리스트/표 칸(spellcheck=false를 각 요소에 개별로도 걸어뒀지만, 혹시 빠뜨린 칸이
+      // 있어도 빨간 밑줄이 안 뜨도록 창 전체 단위로 한 번 더 확실히 꺼둠) — 1.8.14 2차 피드백
+      spellcheck: false,
+      // 위젯이 닫혀 있을 때 알람 소리를 낼 수 있도록 메모창에도 자동재생 허용(대체 재생처)
+      autoplayPolicy: 'no-user-gesture-required'
     }
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'memo', 'index.html'));
 
   win.webContents.on('did-finish-load', () => {
-    win.webContents.send('memo:init', memo);
+    // skipTitleFirst는 저장 파일(memos.json)에 남기지 않는 값 — 새 메모를 만드는
+    // 이 순간에만 "제목 입력창을 건너뛸지"를 알려주는 용도라 memo 객체엔 없고
+    // options로만 넘어옴 (기존 메모를 다시 열 때는 항상 false)
+    win.webContents.send('memo:init', { ...memo, skipTitleFirst: !!options.skipTitleFirst });
     if (settingsWindow) win.webContents.send('app:settingsOpened');
   });
 
@@ -162,8 +188,10 @@ function createMemoWindow(memo, options = {}) {
     memoWindows.delete(memo.id);
     // 이 메모창을 대상으로 "메모 연결" 팝업이 열려있었다면 갈 곳이 없어지니 같이 닫음
     if (memoLinkWindow && memoLinkTargetMemoId === memo.id) memoLinkWindow.close();
+    // 이 메모창을 대상으로 "주제 이동" 팝업이 열려있었다면 같이 닫음
+    if (moveTopicWindow && moveTopicTargetMemoId === memo.id) moveTopicWindow.close();
     // 메모창이 닫히면 위젯의 "열림/숨김" 표시 아이콘이 최신 상태를 반영하도록 새로고침 신호를 보냄
-    if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+    broadcastMemosUpdated();
   });
 
   // forceVisible: 주제가 숨김 상태여도 이번에 새로 만든 메모만은 숨기지 않고 바로 보여줌
@@ -180,7 +208,7 @@ function createMemoWindow(memo, options = {}) {
 // 실제로 발생한 뒤에 신호를 보내도록 바꿔서 해결함
 function showWindowAndNotify(win) {
   win.once('show', () => {
-    if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+    broadcastMemosUpdated();
   });
   win.showInactive();
 }
@@ -232,7 +260,9 @@ function createWidgetWindow(initialPos) {
     icon: ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true
+      contextIsolation: true,
+      // 알람 소리를 사용자 클릭 없이도 낼 수 있게 자동재생 허용(위젯이 알람음 재생 담당)
+      autoplayPolicy: 'no-user-gesture-required'
     }
   });
 
@@ -286,8 +316,123 @@ function createWidgetWindow(initialPos) {
     s.widget.y = y;
     store.saveSettings(s);
     const work = screen.getDisplayNearestPoint({ x, y }).workArea;
-    widgetWindow.webContents.send('screen:workAreaChanged', { width: work.width, height: work.height });
+    // (1.8.16 신규) 위젯을 옮길 때만 위/아래 고정 기준을 다시 계산함(내용물 때문에 창이
+    // 커질 때는 계산 안 함 — computeWidgetVerticalAnchor 주석 참고)
+    widgetVerticalAnchor = computeWidgetVerticalAnchor(widgetWindow);
+    widgetWindow.webContents.send('screen:workAreaChanged', {
+      width: work.width,
+      height: work.height,
+      verticalAnchor: widgetVerticalAnchor
+    });
   });
+}
+
+// ---------- 달력 창 ----------
+// 메모앱과 같은 앱 안의 별도 창. 위젯 창과 같은 안정적 방식(frameless, skipTaskbar,
+// transparent 끄고 배경색 채움, opacity로 반투명)을 그대로 따름. 위치/크기는 저장·복원.
+function createCalendarWindow() {
+  if (calendarWindow) {
+    calendarWindow.show();
+    calendarWindow.focus();
+    return calendarWindow;
+  }
+  const settings = store.getSettings();
+  const cal = settings.calendar || {};
+  const { width: sw, height: shp } = screen.getPrimaryDisplay().workAreaSize;
+
+  const winW = typeof cal.width === 'number' ? cal.width : 340;
+  const winH = typeof cal.height === 'number' ? cal.height : 360;
+  const hasSavedPos = typeof cal.x === 'number' && typeof cal.y === 'number';
+  const startX = hasSavedPos ? cal.x : Math.round((sw - winW) / 2);
+  const startY = hasSavedPos ? cal.y : Math.round((shp - winH) / 2);
+
+  calendarWindow = new BrowserWindow({
+    width: winW,
+    height: winH,
+    x: startX,
+    y: startY,
+    minWidth: 280,
+    minHeight: 280,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#F7F4EC',
+    hasShadow: false,
+    roundedCorners: false,
+    alwaysOnTop: false,      // 바탕화면 위젯처럼 뒤에 깔림(항상위 아님). 뒤로/앞으로 동작은 다음 단계에서 다듬음
+    resizable: true,
+    maximizable: false,
+    skipTaskbar: true,
+    // (7단계) 평소엔 포커스를 안 받는 "잠금" 상태로 시작 — 클릭해도 달력이 앞으로 튀어나오지 않음
+    focusable: false,
+    // 투명도는 전체 설정과 별개로 달력 전용 값 사용(설정 > 달력)
+    opacity: (typeof cal.opacity === 'number' ? cal.opacity : 100) / 100,
+    icon: ICON_PATH,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true
+    }
+  });
+
+  calendarWindow.loadFile(path.join(__dirname, 'renderer', 'calendar', 'index.html'));
+  calendarWindow.on('closed', () => (calendarWindow = null));
+
+  // "달력이 열려 있음"을 기억 — 앱을 껐다 켜면 자동으로 다시 열림(태훈님 요청 2026-07-24).
+  // 트레이에서 직접 닫으면 toggleCalendar가 기억을 지움. 앱 종료 때는 안 지워짐(그래서 복원됨)
+  saveCalendarOpenState(true);
+
+  // 위치가 바뀌면 저장 → 다음에 켤 때 그 자리에서 시작
+  calendarWindow.on('moved', () => {
+    const s = store.getSettings();
+    const [x, y] = calendarWindow.getPosition();
+    s.calendar = { ...(s.calendar || {}), x, y };
+    store.saveSettings(s);
+  });
+  // 크기가 바뀌면 저장
+  calendarWindow.on('resized', () => {
+    const s = store.getSettings();
+    const [width, height] = calendarWindow.getSize();
+    s.calendar = { ...(s.calendar || {}), width, height };
+    store.saveSettings(s);
+  });
+
+  // (7단계) 활성화 상태에서 다른 곳을 클릭해 포커스를 잃으면 → 다시 잠금(배경) 상태로.
+  // setFocusable(false)라서 이후 클릭으로는 달력이 앞으로 안 나오고, 더블클릭해야 다시 활성화됨.
+  calendarWindow.on('blur', () => {
+    if (!calendarWindow || calendarWindow.isDestroyed()) return;
+    calendarWindow.setFocusable(false);
+    calendarWindow.webContents.send('calendar:activeChanged', false);
+  });
+
+  return calendarWindow;
+}
+
+// 달력 열림 상태 저장(settings.calendar.wasOpen — 병합만, 통째 덮어쓰기 금지)
+function saveCalendarOpenState(open) {
+  const s = store.getSettings();
+  s.calendar = { ...(s.calendar || {}), wasOpen: !!open };
+  store.saveSettings(s);
+}
+
+function toggleCalendar() {
+  if (calendarWindow) {
+    // 사용자가 직접 닫는 경우 — 다음에 앱을 켜도 안 열리게 기억을 지움
+    saveCalendarOpenState(false);
+    calendarWindow.close();
+  } else {
+    createCalendarWindow();
+  }
+}
+
+// 메모/주제가 바뀌었음을 "데이터를 보는 창"(위젯 + 달력) 모두에 알림.
+// 예전엔 위젯에만 보냈는데, 달력 창도 같은 메모를 보여주므로 함께 갱신되게 헬퍼로 묶음.
+// (동작은 기존과 동일 + 달력 창이 열려 있을 때만 추가로 신호를 받음)
+function broadcastMemosUpdated() {
+  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  if (calendarWindow) calendarWindow.webContents.send('memos:updated');
+}
+function broadcastTopicsUpdated() {
+  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
+  if (calendarWindow) calendarWindow.webContents.send('topics:updated');
 }
 
 function createSettingsWindow() {
@@ -301,7 +446,10 @@ function createSettingsWindow() {
     minWidth: 560,
     minHeight: 560,
     frame: true,
-    skipTaskbar: true,
+    // 작업표시줄에 반드시 띄움. 예전엔 true(=작업표시줄에 안 보임)였는데, 설정 도중 다른
+    // 프로그램을 클릭하면 설정창이 그 뒤로 숨는데 작업표시줄에도 없어서 다시 불러올 방법이
+    // 없었음 → "설정창이 저절로 닫힌다"로 보였던 문제(실제로는 살아있었음)
+    skipTaskbar: false,
     icon: ICON_PATH,
     title: '설정',
     webPreferences: {
@@ -407,6 +555,59 @@ function createMemoLinkWindow(memoId, anchorWin) {
     if (memoLinkWindow === win) {
       memoLinkWindow = null;
       memoLinkTargetMemoId = null;
+    }
+  });
+}
+
+// "다른 주제로 이동" 팝업. 메모지 안에 갇힌 모달이라 주제가 많으면 고르기 힘들다는
+// 문제 때문에, 위 createMemoLinkWindow와 같은 방식(anchorWin 옆에 붙는 별도 작은 창)으로 뺌
+function createMoveTopicWindow(memoId, anchorWin) {
+  if (moveTopicWindow) {
+    moveTopicWindow.close();
+  }
+  moveTopicTargetMemoId = memoId;
+
+  const POPUP_WIDTH = 260;
+  const POPUP_HEIGHT = 380;
+  let x = 100;
+  let y = 100;
+
+  if (anchorWin && !anchorWin.isDestroyed()) {
+    const b = anchorWin.getBounds();
+    const work = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea;
+
+    x = b.x + b.width + 8;
+    if (x + POPUP_WIDTH > work.x + work.width) x = b.x - POPUP_WIDTH - 8;
+    if (x < work.x) x = work.x + 8;
+
+    y = b.y;
+    if (y + POPUP_HEIGHT > work.y + work.height) y = work.y + work.height - POPUP_HEIGHT;
+    if (y < work.y) y = work.y;
+  }
+
+  const win = new BrowserWindow({
+    width: POPUP_WIDTH,
+    height: POPUP_HEIGHT,
+    x,
+    y,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: true,
+    backgroundColor: '#FBFAF5',
+    icon: ICON_PATH,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true
+    }
+  });
+  moveTopicWindow = win;
+  win.loadFile(path.join(__dirname, 'renderer', 'moveTopic', 'index.html'));
+  win.on('closed', () => {
+    if (moveTopicWindow === win) {
+      moveTopicWindow = null;
+      moveTopicTargetMemoId = null;
     }
   });
 }
@@ -685,7 +886,22 @@ function createNewMemo(topicId) {
     collapsed: false,
     attachments: templateAttachments, // [{ storedName, originalName }] (템플릿 있으면 자동 채움)
     checklist: templateChecklist, // [{ id, text, checked }] 체크리스트 항목 목록(템플릿 있으면 자동 채움)
+    tables: [], // [{ id, rows: [[셀글자,...],...] }] 표 목록(체크리스트와 같은 급, 새 메모는 항상 빈 배열로 시작)
     postSaveAction: null, // null 이면 설정 기본값 따름, 'override' 면 기본값의 반대 (옵시디언으로 보낸 후 동작)
+    // 일정(달력) 기능: useCalendar=이 메모에서 일정 날짜 칸을 쓰는지(주제의 useCalendar 기본값을
+    // 물려받되 메모창에서 개별로 껐다 켤 수 있음). scheduleAt="YYYY-MM-DDTHH:mm"(로컬 시각) 또는 null.
+    useCalendar: topic ? !!topic.useCalendar : false,
+    scheduleAt: null,
+    // 알람: 일정 날짜(scheduleAt) 기준으로 울림. 앱이 켜져 있을 때만 동작(트레이 상주).
+    // before=며칠/몇시간/몇분 전(전부 0=정시), repeat=반복주기, methods=울리는 방식 목록,
+    // firedFor=마지막으로 울린 대상 시각(ISO 문자열, 같은 알람이 두 번 안 울리게 하는 표식).
+    alarm: {
+      enabled: false,
+      before: { days: 0, hours: 0, minutes: 0 },
+      repeat: 'none',
+      methods: ['notify', 'sound'],
+      firedFor: null
+    },
     obsidian: { saved: false, filePath: null }
   };
 
@@ -700,11 +916,80 @@ function createNewMemo(topicId) {
     materializeHiddenState();
     markManualVisibilityChange();
   }
-  createMemoWindow(memo, { forceVisible: true });
+  createMemoWindow(memo, { forceVisible: true, skipTitleFirst: !!(topic && topic.skipTitleFirst) });
   // (수정) 예전엔 여기서 위젯에 알림을 안 보내서, 새 메모 만든 직후엔 위젯 목록에
   // 바로 안 보이고 뭔가 입력해야(제목 등) 그때서야 반영되는 약간의 지연이 있었음
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return memo;
+}
+
+/* ---------- 달력 빠른 일정 (0.20.0, 태훈님 확정 2026-08-15) ----------
+   예전에는 달력에서 일정을 만들려면 [날짜 클릭 → +새 메모 → 주제 고르기 → 메모창]
+   네 단계를 거쳐야 했고, 만들어진 일정이 일반 메모와 섞여서 메모장이 지저분해졌음.
+
+   [고른 방법] 데이터를 따로 쪼개지 않고 "달력"이라는 주제 하나에 자동으로 넣는다.
+   - 데이터 구조를 안 건드리므로 기존 일정(scheduleAt이 붙은 메모)이 그대로 살아 있음
+   - 메모장에서는 주제로 묶여 있어서 접거나 걸러볼 수 있음
+   - 되돌리기도 쉬움(주제만 지우면 됨)
+   [버린 방법] 일정 전용 데이터 파일(events.json)로 완전 분리 → 달력·위젯·내보내기·백업·
+   알람이 전부 두 갈래가 되고, 기존 일정을 옮기는 변환까지 필요해서 위험 대비 이득이 적음.
+   -------------------------------------------------------------------- */
+
+const CALENDAR_TOPIC_NAME = '달력';
+
+// "달력" 주제를 찾고, 없으면 그때 만든다.
+// 앱 켤 때 미리 만들지 않는 이유: 태훈님이 주제를 지워도 다음 실행에 되살아나 버리기 때문.
+// 실제로 일정을 만들 때만 생기므로 안 쓰면 생기지도 않는다.
+function ensureCalendarTopic() {
+  const topics = store.getTopics();
+  let t = topics.find((x) => x && x.calendarTopic);
+  if (t) return t;
+  // 표식(calendarTopic)이 없더라도 이름이 "달력"인 주제가 이미 있으면 그걸 씀
+  // (손으로 먼저 만들어 뒀을 수 있음. 이름은 "상위주제/달력" 형태일 수도 있어서 뒤쪽도 봄)
+  t = topics.find((x) => {
+    const n = String((x && x.name) || '');
+    return n === CALENDAR_TOPIC_NAME || n.endsWith('/' + CALENDAR_TOPIC_NAME);
+  });
+  if (t) {
+    t.calendarTopic = true;
+    t.useCalendar = true;
+    store.saveTopics(topics);
+    refreshTrayMenu();
+    broadcastTopicsUpdated();
+    return t;
+  }
+  const created = {
+    id: randomUUID(),
+    name: CALENDAR_TOPIC_NAME,
+    description: '달력에서 만든 일정',
+    iconChar: '📅',
+    color: '#C9A24B',
+    textColor: '#3A2E10',
+    memoColor: '#F3E6C4',
+    hidden: false,
+    useCalendar: true,   // 이 주제의 메모는 일정 날짜 칸을 기본으로 켬
+    calendarTopic: true, // 이름을 바꿔도 계속 찾을 수 있게 하는 표식
+  };
+  topics.push(created);
+  store.saveTopics(topics);
+  refreshTrayMenu();
+  broadcastTopicsUpdated();
+  return created;
+}
+
+// "09", "930", "9:30", "0930" 같은 입력을 "HH:mm"으로 맞춰줌. 못 알아보면 null
+function normalizeScheduleTime(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return null;
+  const d = s.replace(/[^0-9]/g, '');
+  let h, m;
+  if (d.length === 1 || d.length === 2) { h = +d; m = 0; }
+  else if (d.length === 3) { h = +d.slice(0, 1); m = +d.slice(1); }
+  else if (d.length === 4) { h = +d.slice(0, 2); m = +d.slice(2); }
+  else return null;
+  if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) return null;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(h)}:${p(m)}`;
 }
 
 // ---------- 전역 단축키 ----------
@@ -738,6 +1023,7 @@ function buildTrayMenu() {
     ...(topicItems.length ? [{ type: 'separator' }, ...topicItems] : []),
     { type: 'separator' },
     { label: '위젯 열기/닫기', click: toggleWidget },
+    { label: '달력 열기/닫기', click: toggleCalendar },
     { label: '설정', click: createSettingsWindow },
     { label: '도움말', click: createHelpWindow },
     // (주의) click: createWelcomeWindow 로 직접 넘기면 Electron이 (menuItem, ...) 인자를 그대로
@@ -846,6 +1132,32 @@ function seedInitialDataIfNeeded() {
   store.saveSettings(settings);
 }
 
+// ---------- 데이터 원본 백업(일정·알람·가계부 보호) ----------
+// md 백업만으로는 일정 날짜·알람 설정·가계부 기록이 복구되지 않음(md 파일에 그 정보가 없음).
+// 그래서 백업할 때 원본 JSON(memos/topics/categories/ledger)도 백업 폴더의
+// "데이터원본" 하위폴더에 같이 복사해둠. 복구 때 이 폴더가 있으면 이걸 우선 사용함.
+// settings.json은 컴퓨터마다 다른 값(경로 등)이라 일부러 뺌.
+function backupRawData(baseDir) {
+  try {
+    const dir = path.join(baseDir, '데이터원본');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    ['memos', 'topics', 'categories', 'ledger'].forEach((key) => {
+      const src = store.getDataFilePath(key);
+      if (src && fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(dir, path.basename(src)));
+      }
+    });
+    fs.writeFileSync(
+      path.join(dir, '읽어주세요.txt'),
+      'Memo.md가 복구할 때 쓰는 원본 데이터 폴더입니다.\n' +
+      '일정 날짜·알람·가계부 기록까지 복구하려면 이 폴더를 지우거나 수정하지 마세요.\n',
+      'utf-8'
+    );
+  } catch (err) {
+    console.error('데이터 원본 백업 실패:', err); // md 백업은 이미 됐으니 조용히 넘어감
+  }
+}
+
 // ---------- 자동 백업 ----------
 // 설정 > 일반 탭의 "자동 백업"이 켜져있으면, 지정한 주기(또는 프로그램 켤 때마다)에 맞춰
 // 조용히 md 파일로 저장함. exportAllMemosOverwrite를 써서 항상 같은 파일에 덮어쓰기 때문에
@@ -876,6 +1188,7 @@ function maybeRunAutoBackup({ isLaunch } = {}) {
       format: 'md',
       attachDir: ATTACH_DIR()
     });
+    backupRawData(cfg.folderPath); // 일정·알람·가계부 원본도 같이 백업
   } catch (err) {
     console.error('자동 백업 실패:', err);
     return; // 실패하면 lastRunAt을 안 남겨서 다음 체크 때 다시 시도하게 함
@@ -886,12 +1199,150 @@ function maybeRunAutoBackup({ isLaunch } = {}) {
   store.saveSettings(latest);
 }
 
+// ---------- 위지윅 2-1단계: 체크리스트를 본문 안으로 옮기는 1회 변환 ----------
+// 예전 메모는 체크리스트가 본문과 별개인 memo.checklist 배열에 들어있었음.
+// 이제는 본문에 "- [ ] 할일" 줄로 직접 들어가므로, 예전 메모를 한 번 변환해줘야 함.
+//
+// [설계 결정 2026-08-14] 원래 인계서에는 "메모를 열 때 1회 변환"으로 적어뒀는데,
+// 앱을 켤 때 전체를 한 번에 변환하는 방식으로 바꿨음. 이유:
+//  - 백업을 딱 한 번만 뜨면 됨(메모마다 뜨면 백업이 지저분해짐)
+//  - 변환된 메모와 안 된 메모가 섞여 있는 상태가 아예 안 생김(내보내기 코드가 단순해짐)
+//  - 중간에 앱이 꺼져도 다음 실행 때 남은 것부터 이어서 함
+//
+// 합치는 순서는 인계서대로 "화면에 보이던 순서" = 체크리스트를 본문 맨 앞에 붙임.
+// 되돌릴 수 없는 작업이므로 변환 전에 memos.json 사본을 반드시 남긴다.
+function migrateChecklistIntoContent() {
+  let memos;
+  try {
+    memos = store.getMemos();
+  } catch (err) {
+    console.error('체크리스트 변환: 메모를 읽지 못해 건너뜀', err);
+    return;
+  }
+  const targets = memos.filter(needsChecklistMigration);
+  if (!targets.length) return;
+
+  // 되돌릴 수 없으므로 원본 사본을 먼저 남김 (앱 데이터 폴더에 날짜 붙여 저장)
+  try {
+    const src = store.getDataFilePath('memos');
+    if (src && fs.existsSync(src)) {
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const dst = path.join(path.dirname(src), `memos.체크리스트변환전.${stamp}.json`);
+      if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    }
+  } catch (err) {
+    console.error('체크리스트 변환: 백업 실패 — 변환을 중단함', err);
+    return; // 백업을 못 뜨면 변환하지 않음(안전 우선)
+  }
+
+  targets.forEach((memo) => {
+    memo.content = buildContentWithChecklist(memo);
+    memo.checklist = [];
+    memo.schemaVersion = 2;
+  });
+
+  try {
+    store.saveMemos(memos);
+    console.log(`체크리스트 변환 완료: 메모 ${targets.length}개`);
+  } catch (err) {
+    console.error('체크리스트 변환: 저장 실패', err);
+  }
+}
+
+// ---------- 위지윅 2-2단계: 표를 본문 안으로 옮기는 1회 변환 ----------
+// 방식은 위 체크리스트 변환과 완전히 같음(앱 켤 때 한 번에, 백업 먼저, 백업 실패 시 중단).
+// 붙이는 자리는 본문 맨 앞 — 예전 메모창에서 표가 본문 위에 있었기 때문(태훈님 확정 2026-08-15).
+function migrateTablesIntoContent() {
+  let memos;
+  try {
+    memos = store.getMemos();
+  } catch (err) {
+    console.error('표 변환: 메모를 읽지 못해 건너뜀', err);
+    return;
+  }
+  const targets = memos.filter(needsTableMigration);
+  if (!targets.length) return;
+
+  // 되돌릴 수 없으므로 원본 사본을 먼저 남김
+  try {
+    const src = store.getDataFilePath('memos');
+    if (src && fs.existsSync(src)) {
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const dst = path.join(path.dirname(src), `memos.표변환전.${stamp}.json`);
+      if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    }
+  } catch (err) {
+    console.error('표 변환: 백업 실패 — 변환을 중단함', err);
+    return; // 백업을 못 뜨면 변환하지 않음(안전 우선)
+  }
+
+  targets.forEach((memo) => {
+    memo.content = buildContentWithTables(memo);
+    memo.tables = [];
+    memo.schemaVersion = 3;
+  });
+
+  try {
+    store.saveMemos(memos);
+    console.log(`표 변환 완료: 메모 ${targets.length}개`);
+  } catch (err) {
+    console.error('표 변환: 저장 실패', err);
+  }
+}
+
+// ---------- 위지윅 3단계: 이미지를 본문 안으로 옮기는 1회 변환 ----------
+// 방식은 위 두 변환과 완전히 같음(앱 켤 때 한 번에, 백업 먼저, 백업 실패 시 중단).
+// 붙이는 자리는 본문 맨 앞, 캡션은 이미지 바로 아랫줄 *기울임* (태훈님 확정 2026-08-15).
+// 이미지 파일 자체는 건드리지 않는다 — 본문에 참조 줄을 넣을 뿐이라 되돌리기도 쉬움.
+function migrateImagesIntoContent() {
+  let memos;
+  try {
+    memos = store.getMemos();
+  } catch (err) {
+    console.error('이미지 변환: 메모를 읽지 못해 건너뜀', err);
+    return;
+  }
+  const targets = memos.filter(needsImageMigration);
+  if (!targets.length) return;
+
+  // 되돌릴 수 없으므로 원본 사본을 먼저 남김
+  try {
+    const src = store.getDataFilePath('memos');
+    if (src && fs.existsSync(src)) {
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      const dst = path.join(path.dirname(src), `memos.이미지변환전.${stamp}.json`);
+      if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    }
+  } catch (err) {
+    console.error('이미지 변환: 백업 실패 — 변환을 중단함', err);
+    return; // 백업을 못 뜨면 변환하지 않음(안전 우선)
+  }
+
+  targets.forEach((memo) => {
+    memo.content = buildContentWithImages(memo);
+    memo.schemaVersion = 4;
+  });
+
+  try {
+    store.saveMemos(memos);
+    console.log(`이미지 변환 완료: 메모 ${targets.length}개`);
+  } catch (err) {
+    console.error('이미지 변환: 저장 실패', err);
+  }
+}
+
 // ---------- 앱 시작 ----------
 
 app.whenReady().then(() => {
   // 이중 실행으로 판정돼 종료 중인 앱이 트레이/창을 만들지 않게 함(위 requestSingleInstanceLock 참고)
   if (!gotSingleInstanceLock) return;
   seedInitialDataIfNeeded();
+  migrateChecklistIntoContent(); // 창을 만들기 전에 끝내야 함(메모창이 옛 데이터를 읽지 않게)
+  migrateTablesIntoContent();    // 같은 이유로 여기서(체크리스트 다음에) 한 번에 끝냄
+  migrateImagesIntoContent();    // 3단계. 표 다음에 붙어야 순서가 이미지 → 표 → 체크리스트 → 본문
 
   tray = new Tray(TRAY_ICON_PATH);
   tray.setToolTip('Memo.md - 클릭: 위젯 열기/앞으로, 더블클릭: 새 메모');
@@ -938,6 +1389,12 @@ app.whenReady().then(() => {
   // 직접 닫은 건 대상에서 빠짐 — markMemoWindowOpen/reopenPreviouslyOpenMemos 참고)
   reopenPreviouslyOpenMemos();
 
+  // 달력도 마찬가지 — 지난번에 열어둔 채 껐으면 자동으로 다시 열어줌
+  // (트레이에서 직접 닫고 껐으면 wasOpen=false라 안 열림)
+  if (settings.calendar && settings.calendar.wasOpen) {
+    createCalendarWindow();
+  }
+
   // 휴지통 보관기한(60일) 지난 항목 정리 — 앱 켤 때 한 번만 확인
   cleanupExpiredTrash();
 
@@ -945,6 +1402,16 @@ app.whenReady().then(() => {
   // "지금이 백업할 때인지" 다시 확인함(정확한 그 시각이 아니라 최대 1시간 오차 안에서 실행됨)
   maybeRunAutoBackup({ isLaunch: true });
   setInterval(() => maybeRunAutoBackup({ isLaunch: false }), 60 * 60 * 1000);
+
+  // 알람 검사: 앱이 켜져 있는 동안 20초마다 모든 메모의 일정 시각을 확인해 때가 되면 울림
+  // (앱이 꺼져 있으면 안 울림 — 트레이 상주 전제). 켜자마자 한 번도 확인.
+  checkAlarms();
+  setInterval(checkAlarms, 20 * 1000);
+
+  // 가계부 고정 지출: 켤 때 한 번 + 한 시간마다 "오늘이 기입할 날인지" 확인
+  // (자정을 넘겨 계속 켜둔 경우에도 다음 확인 때 자동 기입됨)
+  applyFixedExpenses();
+  setInterval(applyFixedExpenses, 60 * 60 * 1000);
 });
 
 app.on('window-all-closed', (e) => {
@@ -960,6 +1427,10 @@ app.on('will-quit', () => {
 
 ipcMain.handle('settings:get', () => store.getSettings());
 
+// (1.8.16 신규) 설정화면에 지금 실행 중인 버전을 작게 보여주기 위함 — package.json의
+// version 값을 Electron이 자동으로 읽어서 돌려줌(따로 관리 안 해도 항상 정확함)
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
 // 위젯이 화면 밖으로 넘어갈 만큼 커지지 않도록, 위젯 자동크기 계산에 쓸 화면 크기를 알려줌
 // (수정) 예전엔 항상 1번 모니터(주 모니터) 크기로 알려줘서, 위젯을 다른(특히 더 작은) 모니터에
 // 두고 쓰면 그 모니터보다 크게 자동 확장될 수 있었음 — 위젯이 지금 실제로 있는 모니터 기준으로 알려주도록 바꿈
@@ -967,7 +1438,10 @@ ipcMain.handle('screen:getWorkArea', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const b = win ? win.getBounds() : null;
   const work = b ? screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea : screen.getPrimaryDisplay().workArea;
-  return { width: work.width, height: work.height };
+  // (1.8.16 신규) 위젯을 처음 띄울 때(재시작 포함)도 그 시점 위치 기준으로 위/아래 고정
+  // 기준을 한 번 계산해둠 — 이 핸들러는 지금 위젯 창에서만 호출되므로 win이 곧 위젯 창임
+  if (win) widgetVerticalAnchor = computeWidgetVerticalAnchor(win);
+  return { width: work.width, height: work.height, verticalAnchor: widgetVerticalAnchor };
 });
 
 ipcMain.handle('settings:save', (event, incoming) => {
@@ -980,7 +1454,9 @@ ipcMain.handle('settings:save', (event, incoming) => {
     exportNameRule: { ...current.exportNameRule, ...incoming.exportNameRule },
     // autoBackup.lastRunAt은 설정창 폼에 없는 내부 값이라, 그냥 덮어쓰면 자동 백업 다음 실행
     // 시점 계산이 틀어짐 — 기존 값을 지키면서 설정창에서 바꾼 값만 덧씀
-    autoBackup: { ...current.autoBackup, ...incoming.autoBackup }
+    autoBackup: { ...current.autoBackup, ...incoming.autoBackup },
+    // calendar에는 설정창 폼에 없는 내부 값(창 위치/크기)이 있어서 통째로 덮어쓰면 안 됨
+    calendar: { ...current.calendar, ...incoming.calendar }
   };
   const saved = store.saveSettings(merged);
   app.setLoginItemSettings({ openAtLogin: !!saved.autoLaunch });
@@ -993,12 +1469,36 @@ ipcMain.handle('settings:save', (event, incoming) => {
   const op = (typeof saved.opacity === 'number' ? saved.opacity : 100) / 100;
   if (widgetWindow) widgetWindow.setOpacity(op);
   memoWindows.forEach((w) => w.setOpacity(op));
+  // 달력은 전용 투명도(설정 > 달력) 사용
+  if (calendarWindow && !calendarWindow.isDestroyed()) {
+    const calOp = (saved.calendar && typeof saved.calendar.opacity === 'number' ? saved.calendar.opacity : 100) / 100;
+    calendarWindow.setOpacity(calOp);
+  }
 
   // 위젯 상단바 색상, 특수문자 목록 등 렌더러가 반영해야 할 값이 바뀌었을 수 있으니 새로고침 신호
   if (widgetWindow) widgetWindow.webContents.send('settings:updated');
   memoWindows.forEach((w) => w.webContents.send('settings:updated'));
+  // 달력창도(주 시작 요일 등) 즉시 반영
+  if (calendarWindow && !calendarWindow.isDestroyed()) calendarWindow.webContents.send('settings:updated');
 
   return saved;
+});
+
+// 달력창 ⚙️ 전용 저장: settings.calendar 부분만 병합 저장(다른 설정은 안 건드림).
+// 저장 후 달력 투명도 즉시 적용 + 달력창에 새로고침 신호
+ipcMain.handle('calendar:saveSettings', (event, incoming) => {
+  const current = store.getSettings();
+  const merged = {
+    ...current,
+    calendar: { ...current.calendar, ...(incoming || {}) }
+  };
+  const saved = store.saveSettings(merged);
+  if (calendarWindow && !calendarWindow.isDestroyed()) {
+    const calOp = (saved.calendar && typeof saved.calendar.opacity === 'number' ? saved.calendar.opacity : 100) / 100;
+    calendarWindow.setOpacity(calOp);
+    calendarWindow.webContents.send('settings:updated');
+  }
+  return saved.calendar;
 });
 
 ipcMain.handle('settings:chooseVaultFolder', async () => {
@@ -1023,7 +1523,7 @@ ipcMain.handle('topics:add', (event, topic) => {
   topics.push(newTopic);
   store.saveTopics(topics);
   refreshTrayMenu();
-  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
+  broadcastTopicsUpdated();
   return newTopic;
 });
 
@@ -1062,7 +1562,7 @@ ipcMain.handle('topics:update', (event, topic) => {
   }
 
   refreshTrayMenu();
-  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
+  broadcastTopicsUpdated();
   return idx !== -1 ? topics[idx] : topic;
 });
 
@@ -1082,7 +1582,7 @@ ipcMain.handle('topics:reorder', (event, orderedIds) => {
   });
   store.saveTopics(reordered);
   refreshTrayMenu();
-  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
+  broadcastTopicsUpdated();
   return reordered;
 });
 
@@ -1100,7 +1600,7 @@ ipcMain.handle('topics:delete', (event, topicId) => {
   // 주의: 이 주제에 딸린 메모들의 첨부파일은 여기서 안 건드림(메모는 그대로 유지되니까)
   if (target) (target.templateAttachments || []).forEach((a) => deleteStoredFile(a.storedName));
   refreshTrayMenu();
-  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
+  broadcastTopicsUpdated();
   return topics;
 });
 
@@ -1137,7 +1637,7 @@ ipcMain.handle('memos:setTopic', (event, { memoId, topicId }) => {
     }
   }
 
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return memos[idx];
 });
 
@@ -1172,7 +1672,7 @@ ipcMain.handle('memos:saveAsTemplate', (event, { memoId, topicId }) => {
     templateSize: memo.size || null
   };
   store.saveTopics(topics);
-  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
+  broadcastTopicsUpdated();
   return topics[idx];
 });
 
@@ -1183,15 +1683,48 @@ ipcMain.handle('categories:getAll', () => store.getCategories());
 
 ipcMain.handle('categories:add', (event, category) => {
   const categories = store.getCategories();
-  const newCategory = { id: randomUUID(), name: String(category.name || '').trim() };
+  const newCategory = {
+    id: randomUUID(),
+    name: String(category.name || '').trim(),
+    color: category.color || '#8A8574'
+  };
   categories.push(newCategory);
   store.saveCategories(categories);
   return newCategory;
 });
 
+// 카테고리 색상만 나중에 바꿀 수 있게(이름은 지금처럼 삭제 후 재생성으로만 바뀜 — 이름은
+// 주제 이름의 "카테고리/주제" 접두사와 직접 연결돼있어서 여기서 바꾸면 기존 주제와 어긋남)
+ipcMain.handle('categories:update', (event, category) => {
+  const categories = store.getCategories();
+  const idx = categories.findIndex((c) => c.id === category.id);
+  if (idx !== -1) categories[idx] = { ...categories[idx], ...category };
+  store.saveCategories(categories);
+  return idx !== -1 ? categories[idx] : category;
+});
+
 ipcMain.handle('categories:delete', (event, categoryId) => {
   const categories = store.getCategories().filter((c) => c.id !== categoryId);
   store.saveCategories(categories);
+  return categories;
+});
+
+// 위젯의 카테고리별 숨김버튼: 그 카테고리에 속한 주제 전체를 한번에 화면에서만 숨김/보임 처리.
+// (변경, 1.8.14) 예전엔 주제관리에서 하나씩 체크하는 topic.hidden 값을 여러 개 한번에 바꾸는
+// 방식이었는데, 그러면 위젯 상단의 "숨김 N개" 버튼(topic.hidden 개수를 세는 것)과 주제목록의
+// 숨김 표시가 카테고리 버튼을 누를 때마다 같이 바뀌어버리는 문제가 있었음(태훈님 확인).
+// 그래서 topic.hidden은 전혀 건드리지 않고, 카테고리 자신의 hidden 값만 따로 저장하는 방식으로
+// 분리함 — 화면에 보일지 말지는 renderer(widget.js)의 visibleTopics()에서 "주제 자신의 hidden"과
+// "소속 카테고리의 hidden"을 각각 따로 확인해서 판단함
+ipcMain.handle('topics:setCategoryHidden', (event, { categoryName, hidden }) => {
+  const categories = store.getCategories();
+  const idx = categories.findIndex((c) => c.name === categoryName);
+  if (idx !== -1) {
+    categories[idx] = { ...categories[idx], hidden: !!hidden };
+    store.saveCategories(categories);
+  }
+  refreshTrayMenu();
+  broadcastTopicsUpdated();
   return categories;
 });
 
@@ -1213,9 +1746,126 @@ ipcMain.handle('app:copyText', (event, text) => {
   }
 });
 
+// 색상 붙여넣기 버튼용: 클립보드 텍스트를 읽어서 돌려줌(유효한 색상코드인지 판단은
+// 렌더러 쪽(settings.js)에서 함 — 여기선 클립보드 원본 텍스트만 그대로 전달)
+ipcMain.handle('app:pasteText', () => {
+  try {
+    return clipboard.readText() || '';
+  } catch (err) {
+    console.error('클립보드 읽기 실패:', err);
+    return '';
+  }
+});
+
+// 표 복사 버튼용: 마크다운 문법이 아니라 실제 표로 인식되도록 text(TSV)와 html(<table>)을
+// 같이 클립보드에 씀 — 엑셀/워드/구글시트 등은 붙여넣을 때 html 쪽을 우선 표로 인식하고,
+// 메모장 같은 곳은 text(TSV, 칸은 탭으로 구분)로 붙여넣어짐
+ipcMain.handle('app:copyTable', (event, { text, html }) => {
+  try {
+    clipboard.write({ text: text || '', html: html || '' });
+    return true;
+  } catch (err) {
+    console.error('표 복사 실패:', err);
+    return false;
+  }
+});
+
+// 표 붙여넣기 버튼용: 클립보드의 html/text를 둘 다 돌려줌(어느 걸 쓸지 판단은 렌더러에서 함 —
+// html에 <table>이 있으면 그걸 우선 쓰고, 없으면 text를 줄바꿈=행/탭=칸으로 봄)
+ipcMain.handle('app:pasteTable', () => {
+  try {
+    return { html: clipboard.readHTML() || '', text: clipboard.readText() || '' };
+  } catch (err) {
+    console.error('표 붙여넣기 실패:', err);
+    return { html: '', text: '' };
+  }
+});
+
 ipcMain.handle('memos:createNew', (event, topicId) => {
   if (settingsWindow) return null; // 설정창이 열려있는 동안은 새 메모 생성을 막음
   return createNewMemo(topicId);
+});
+
+/* 달력에서 제목만 치고 엔터 → 메모창을 열지 않고 바로 일정 하나를 만듦 (0.20.0).
+   createNewMemo를 쓰지 않는 이유: 그쪽은 반드시 메모창을 띄우고 주제 템플릿까지 채우는데,
+   여기서 필요한 건 "제목 한 줄짜리 일정"뿐이라 창이 뜨면 오히려 번거로워짐.
+   시각을 안 적으면 00:00으로 저장하고 달력 목록에서는 시각을 안 보여줌
+   (memo.scheduleAt은 "YYYY-MM-DDTHH:mm" 16글자여야 메모창의 일정칸이 정상 동작함). */
+ipcMain.handle('calendar:createSchedule', (event, { dateKey, time, title } = {}) => {
+  if (settingsWindow) return null;
+  const cleanTitle = String(title == null ? '' : title).trim();
+  if (!cleanTitle) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) return null;
+  const hhmm = normalizeScheduleTime(time) || '00:00';
+
+  const topic = ensureCalendarTopic();
+  const now = new Date().toISOString();
+  const memo = {
+    id: randomUUID(),
+    topicId: topic.id,
+    title: cleanTitle,
+    content: '',
+    color: topic.memoColor || topic.color || '#C9A24B',
+    createdAt: now,
+    updatedAt: now,
+    position: nextNewMemoPosition(320, 380),
+    alwaysOnTop: false,
+    collapsed: false,
+    attachments: [],
+    checklist: [],
+    tables: [],
+    postSaveAction: null,
+    useCalendar: true,
+    scheduleAt: `${dateKey}T${hhmm}`,
+    alarm: {
+      enabled: false,
+      before: { days: 0, hours: 0, minutes: 0 },
+      repeat: 'none',
+      methods: ['notify', 'sound'],
+      firedFor: null
+    },
+    obsidian: { saved: false, filePath: null }
+  };
+
+  const memos = store.getMemos();
+  memos.push(memo);
+  store.saveMemos(memos);
+  broadcastMemosUpdated();
+  return memo;
+});
+
+/* 달력 목록에서 시각만 그 자리에서 고침 (0.20.1, 태훈님 확정 2026-08-15).
+   날짜는 안 건드리고 뒤의 "HH:mm"만 갈아끼운다. 예전에는 시각 하나 바꾸려고
+   메모창을 열어야 했음.
+   - 시각 해석("9" → 09:00)은 빠른 입력칸과 똑같이 normalizeScheduleTime 하나만 쓴다.
+     달력 쪽에 같은 규칙을 또 만들면 나중에 한쪽만 고쳐져서 어긋난다.
+   - 빈 값이면 00:00("시각을 안 적은 일정")으로 되돌린다. 목록에서 시각이 안 보이게 됨.
+   - 못 알아보는 값이면 아무것도 안 바꾸고 null을 돌려준다(달력이 원래 값으로 되돌림).
+   - 시각이 바뀌면 알람 기준도 바뀌므로 memos:setScheduleAt 과 똑같이 firedFor를 다시 맞춘다.
+     안 그러면 지나간 시각으로 바꾼 순간 알람이 곧바로 울린다. */
+ipcMain.handle('calendar:setScheduleTime', (event, { memoId, time } = {}) => {
+  const memos = store.getMemos();
+  const idx = memos.findIndex((m) => m.id === memoId);
+  if (idx === -1) return null;
+
+  const cur = memos[idx].scheduleAt;
+  if (typeof cur !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(cur)) return null;
+
+  const raw = String(time == null ? '' : time).trim();
+  const hhmm = raw ? normalizeScheduleTime(raw) : '00:00';
+  if (!hhmm) return null;   // 못 알아보는 값 → 안 바꿈
+
+  const next = `${cur.slice(0, 10)}T${hhmm}`;
+  if (next === cur) return memos[idx];   // 바뀐 게 없으면 저장도 안 함
+
+  memos[idx].scheduleAt = next;
+  memos[idx].updatedAt = new Date().toISOString();
+  if (memos[idx].alarm && memos[idx].alarm.enabled) {
+    memos[idx].alarm.firedFor = latestDueFire(memos[idx], new Date());
+  }
+  store.saveMemos(memos);
+  broadcastMemosUpdated();
+  return memos[idx];
 });
 
 ipcMain.handle('memos:updateContent', (event, { memoId, content }) => {
@@ -1225,7 +1875,7 @@ ipcMain.handle('memos:updateContent', (event, { memoId, content }) => {
   memos[idx].content = content;
   memos[idx].updatedAt = new Date().toISOString();
   store.saveMemos(memos);
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return memos[idx];
 });
 
@@ -1235,7 +1885,190 @@ ipcMain.handle('memos:setTitle', (event, { memoId, title }) => {
   if (idx === -1) return null;
   memos[idx].title = title || '';
   store.saveMemos(memos);
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
+  return memos[idx];
+});
+
+// 일정 날짜 저장. value는 "YYYY-MM-DDTHH:mm"(로컬 시각) 문자열 또는 null(지움).
+// 일정 날짜는 MD내보내기 파일명/상단정보에 반영되므로 updatedAt도 갱신해 다시 내보내기 대상이 되게 함.
+ipcMain.handle('memos:setScheduleAt', (event, { memoId, scheduleAt }) => {
+  const memos = store.getMemos();
+  const idx = memos.findIndex((m) => m.id === memoId);
+  if (idx === -1) return null;
+  memos[idx].scheduleAt = scheduleAt || null;
+  memos[idx].updatedAt = new Date().toISOString();
+  // 일정 날짜를 바꾸면 알람 기준 시각도 바뀌므로, 이미 지나간 시각으로 알람이 곧바로
+  // 울리지 않도록 firedFor를 "지금 기준 가장 최근에 지나간 알람 시각"으로 다시 맞춰둠(재기준).
+  if (memos[idx].alarm && memos[idx].alarm.enabled) {
+    memos[idx].alarm.firedFor = latestDueFire(memos[idx], new Date());
+  }
+  store.saveMemos(memos);
+  broadcastMemosUpdated();
+  return memos[idx];
+});
+
+// 이 메모에서 달력(일정 날짜) 기능을 쓸지 on/off. 끄면 일정 칸이 사라지고 저장날짜 기준으로 동작.
+ipcMain.handle('memos:setUseCalendar', (event, { memoId, useCalendar }) => {
+  const memos = store.getMemos();
+  const idx = memos.findIndex((m) => m.id === memoId);
+  if (idx === -1) return null;
+  memos[idx].useCalendar = !!useCalendar;
+  store.saveMemos(memos);
+  return memos[idx];
+});
+
+// ---------- 알람 ----------
+// 저장값("YYYY-MM-DDTHH:mm", 로컬 시각)을 로컬 Date로 만든다. 형식이 아니면 null.
+function alarmBaseDate(scheduleAt) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(scheduleAt || '');
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0);
+}
+// 기준(base)에서 반복주기로 n번째 발생 시각을 만듦. 항상 base에서 직접 계산하므로 오차가
+// 누적되지 않음. 매월/매년은 그 달에 그 날짜가 없으면(예: 1/31의 다음달, 2/29의 평년) 그 달의
+// 말일로 맞춤 — "매월 말일" 류 알람이 엉뚱한 날로 밀리지 않게 함.
+function occurrenceAt(base, repeat, n) {
+  if (repeat === 'daily') { const d = new Date(base.getTime()); d.setDate(d.getDate() + n); return d; }
+  if (repeat === 'weekly') { const d = new Date(base.getTime()); d.setDate(d.getDate() + 7 * n); return d; }
+  const y = base.getFullYear(), mo = base.getMonth(), da = base.getDate(), h = base.getHours(), mi = base.getMinutes();
+  if (repeat === 'monthly') {
+    const total = mo + n;
+    const ny = y + Math.floor(total / 12);
+    const nm = ((total % 12) + 12) % 12;
+    const dim = new Date(ny, nm + 1, 0).getDate(); // 그 달의 마지막 날
+    return new Date(ny, nm, Math.min(da, dim), h, mi, 0, 0);
+  }
+  if (repeat === 'yearly') {
+    const ny = y + n;
+    const dim = new Date(ny, mo + 1, 0).getDate();
+    return new Date(ny, mo, Math.min(da, dim), h, mi, 0, 0);
+  }
+  return new Date(base.getTime());
+}
+// "며칠/몇시간/몇분 전"을 밀리초로.
+function beforeMs(before) {
+  const b = before || {};
+  return ((+b.days || 0) * 1440 + (+b.hours || 0) * 60 + (+b.minutes || 0)) * 60000;
+}
+// 렌더러에서 온 알람 설정을 안전한 형태로 다듬음(빠진 값·이상한 값 방어).
+function normalizeAlarm(a) {
+  a = a || {};
+  const b = a.before || {};
+  const repeats = ['none', 'daily', 'weekly', 'monthly', 'yearly'];
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.floor(+v || 0)));
+  const methods = Array.isArray(a.methods)
+    ? a.methods.filter((m) => ['notify', 'sound', 'popup'].includes(m))
+    : [];
+  return {
+    enabled: !!a.enabled,
+    before: { days: clamp(b.days, 0, 3650), hours: clamp(b.hours, 0, 23), minutes: clamp(b.minutes, 0, 59) },
+    repeat: repeats.includes(a.repeat) ? a.repeat : 'none',
+    methods,
+    firedFor: a.firedFor || null
+  };
+}
+// 지금(now) 기준으로 "이미 지나간 알람 시각" 중 가장 최근 것의 ISO 문자열. 아직 아무것도
+// 안 지났으면 null. (반복이면 scheduleAt에서 주기만큼 굴려가며 지나간 것 중 최신을 찾음)
+function latestDueFire(memo, now) {
+  if (!memo || !memo.useCalendar || !memo.scheduleAt || !memo.alarm || !memo.alarm.enabled) return null;
+  const base = alarmBaseDate(memo.scheduleAt);
+  if (!base) return null;
+  const off = beforeMs(memo.alarm.before);
+  const repeat = memo.alarm.repeat || 'none';
+  const nowMs = now.getTime();
+  if (repeat === 'none') {
+    const f = base.getTime() - off;
+    return f <= nowMs ? new Date(f).toISOString() : null;
+  }
+  let n = 0;
+  let last = null;
+  let guard = 0;
+  while (guard++ < 200000) {
+    const f = occurrenceAt(base, repeat, n).getTime() - off;
+    if (f <= nowMs) { last = f; n++; }
+    else break;
+  }
+  return last === null ? null : new Date(last).toISOString();
+}
+// 메모창을 앞으로(없으면 새로 열어) 가져옴 — 알람 클릭/"메모창 띄우기" 방식용.
+function focusOrOpenMemo(memoId) {
+  const memo = store.getMemos().find((m) => m.id === memoId);
+  if (!memo) return;
+  const win = memoWindows.get(memoId);
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    if (!win.isVisible()) win.show();
+    win.focus();
+  } else {
+    createMemoWindow(memo, { forceVisible: true });
+  }
+}
+// 실제로 알람을 울림: 방식(methods)에 따라 윈도우 알림/소리/메모창 띄우기.
+function fireAlarm(memo) {
+  const methods = (memo.alarm && memo.alarm.methods) || [];
+  const wantNotify = methods.includes('notify');
+  const wantSound = methods.includes('sound');
+  const wantPopup = methods.includes('popup');
+
+  // 소리: 열려있는 창(위젯 우선, 없으면 아무 메모창)에서 짧은 알림음을 재생. 재생할 창이
+  // 하나도 없으면 아래에서 윈도우 알림 자체의 소리로 대체함(soundPlayed=false).
+  let soundPlayed = false;
+  if (wantSound) {
+    let target = (widgetWindow && !widgetWindow.isDestroyed()) ? widgetWindow : null;
+    if (!target) {
+      for (const w of memoWindows.values()) { if (w && !w.isDestroyed()) { target = w; break; } }
+    }
+    if (target) { try { target.webContents.send('alarm:playSound'); soundPlayed = true; } catch (e) {} }
+  }
+
+  if (wantNotify && Notification.isSupported()) {
+    const title = (memo.title && memo.title.trim()) ? memo.title.trim() : '메모 알람';
+    let body = (memo.content || '').replace(/\s+/g, ' ').trim();
+    if (body.length > 80) body = body.slice(0, 80) + '…';
+    if (!body) body = memo.scheduleAt ? memo.scheduleAt.replace('T', ' ') : '';
+    const n = new Notification({
+      title: '⏰ ' + title,
+      body,
+      // 소리를 원하는데 재생할 창이 없었으면, 알림 자체의 소리로라도 울리게 함(silent=false)
+      silent: !(wantSound && !soundPlayed),
+      icon: ICON_PATH
+    });
+    n.on('click', () => focusOrOpenMemo(memo.id));
+    n.show();
+  }
+
+  if (wantPopup) focusOrOpenMemo(memo.id);
+}
+// 주기적으로 모든 메모의 알람을 검사해서 시각이 된 것을 울림(중복 방지: firedFor).
+function checkAlarms() {
+  const now = new Date();
+  const memos = store.getMemos();
+  let changed = false;
+  for (const memo of memos) {
+    if (!memo.useCalendar || !memo.scheduleAt || !memo.alarm || !memo.alarm.enabled) continue;
+    const due = latestDueFire(memo, now);
+    if (due && memo.alarm.firedFor !== due) {
+      fireAlarm(memo);
+      memo.alarm.firedFor = due;
+      changed = true;
+    }
+  }
+  if (changed) store.saveMemos(memos);
+}
+
+// 알람 설정 저장. 저장 시점 기준으로 firedFor를 재기준해서 "이미 지나간 시각"으로는 곧바로
+// 울리지 않게 함(앞으로 올 시각에만 울림). scheduleAt/useCalendar는 다른 핸들러가 관리함.
+ipcMain.handle('memos:setAlarm', (event, { memoId, alarm }) => {
+  const memos = store.getMemos();
+  const idx = memos.findIndex((m) => m.id === memoId);
+  if (idx === -1) return null;
+  const norm = normalizeAlarm(alarm);
+  memos[idx].alarm = norm;
+  // 재기준: 지금 기준 이미 지나간 알람 시각을 firedFor로 찍어두면, 그 지나간 건은 안 울리고
+  // 다음에 올 시각부터 울린다. (아직 아무것도 안 지났으면 null → 제 시각에 울림)
+  norm.firedFor = latestDueFire(memos[idx], new Date());
+  store.saveMemos(memos);
+  broadcastMemosUpdated();
   return memos[idx];
 });
 
@@ -1247,6 +2080,19 @@ ipcMain.handle('memos:setChecklist', (event, { memoId, checklist }) => {
   memos[idx].checklist = Array.isArray(checklist) ? checklist : [];
   // 체크리스트도 MD내보내기 결과물에 포함되므로, 다시 내보내야 하는 상태로 표시되게 updatedAt 갱신
   // (아래 MD내보내기 버튼 흐리게/재활성화 판단 기준 — obsidian:export에서 exportedVersion과 비교함)
+  memos[idx].updatedAt = new Date().toISOString();
+  store.saveMemos(memos);
+  return memos[idx];
+});
+
+// 표(들) 전체를 통째로 교체 저장(칸 글자수정/행·열 추가삭제/표 추가삭제 모두 렌더러에서
+// memo.tables 배열을 만들어 넘김) — memos:setChecklist와 완전히 같은 패턴(1.8.14)
+ipcMain.handle('memos:setTables', (event, { memoId, tables }) => {
+  const memos = store.getMemos();
+  const idx = memos.findIndex((m) => m.id === memoId);
+  if (idx === -1) return null;
+  memos[idx].tables = Array.isArray(tables) ? tables : [];
+  // 표도 MD내보내기 결과물에 포함되므로, 다시 내보내야 하는 상태로 표시되게 updatedAt 갱신
   memos[idx].updatedAt = new Date().toISOString();
   store.saveMemos(memos);
   return memos[idx];
@@ -1276,7 +2122,7 @@ ipcMain.handle('memos:delete', (event, memoId) => {
   }
   const win = memoWindows.get(memoId);
   if (win) win.close();
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return true;
 });
 
@@ -1300,7 +2146,7 @@ ipcMain.handle('trash:restore', (event, memoId) => {
   // (참고) 복구된 메모의 원래 주제가 그 사이 삭제됐을 수 있음 — 그 경우 위젯 주제 목록엔 안
   // 보이지만(주제를 지워도 딸린 메모는 그대로 남는 기존 동작과 동일한 현상), 데이터는
   // 안전하게 살아있고 memos.json에도 정상적으로 들어있음
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return trash;
 });
 
@@ -1353,7 +2199,7 @@ function openOrFocusMemoWindow(memoId) {
   } else {
     createMemoWindow(memo);
     // (수정) 창이 없어서 새로 만든 경우 눈 아이콘이 안 갱신되던 문제 방지(위와 동일)
-    if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+    broadcastMemosUpdated();
   }
   return memo;
 }
@@ -1374,7 +2220,7 @@ ipcMain.handle('memos:toggleOpen', (event, memoId) => {
       markMemoWindowOpen(memoId, false); // 사용자가 직접 닫은 거라 다음 실행 때 안 되살아나게 표시
       // win.on('closed')에서도 새로고침 신호를 보내지만, 그건 창이 실제로 다 닫힌 뒤라
       // 살짝 늦게 반영될 수 있어서 여기서도 바로 한 번 더 보내 눈 아이콘이 즉시 바뀌게 함
-      if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+      broadcastMemosUpdated();
       markManualVisibilityChange(); // 직접 닫은 것도 보임/숨김 변화라 전체숨김 순환을 처음으로 되돌림
       return { opened: false };
     }
@@ -1388,7 +2234,7 @@ ipcMain.handle('memos:toggleOpen', (event, memoId) => {
   // (수정) 창이 아예 없어서 새로 만든 경우엔 여기서 신호를 안 보내서, 이 메모의 눈 아이콘이
   // 안 바뀌다가 "다른" 메모를 건드려야 그제서야 뒤늦게 갱신되는 문제가 있었음(createNewMemo의
   // 같은 패턴과 동일하게 맞춤)
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return { opened: true };
 });
 
@@ -1414,7 +2260,7 @@ ipcMain.handle('memos:toggleTopicOpen', (event, topicId) => {
         win.hide();
       }
     });
-    if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+    broadcastMemosUpdated();
     markManualVisibilityChange();
     return true;
   }
@@ -1427,7 +2273,7 @@ ipcMain.handle('memos:toggleTopicOpen', (event, topicId) => {
     else createMemoWindow(m);
   });
   // (수정) 창이 없어서 새로 만든 메모가 섞여있으면 눈 아이콘이 안 갱신되던 문제 방지(위와 동일)
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   markManualVisibilityChange();
   return false;
 });
@@ -1454,7 +2300,7 @@ ipcMain.handle('memos:setCollapsed', (event, { memoId, value }) => {
       win.setSize(width, memos[idx].size?.height || 380);
     }
   }
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return memos[idx];
 });
 
@@ -1480,7 +2326,7 @@ ipcMain.handle('memos:setColor', (event, { memoId, color }) => {
   if (colorWin) {
     try { colorWin.setBackgroundColor(color); } catch (err) { console.error('배경색 변경 실패:', err); }
   }
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return memos[idx];
 });
 
@@ -1672,8 +2518,91 @@ ipcMain.handle('memos:exportAll', async () => {
     formats,
     attachDir: ATTACH_DIR()
   });
+  backupRawData(folderResult.filePaths[0]); // 일정·알람·가계부 원본도 같이 백업
   return { canceled: false, ...result };
 });
+
+// "데이터원본" 폴더(백업 때 같이 복사해둔 원본 JSON)로 복구 — md 파싱 없이 원본 그대로
+// 되살려서 일정 날짜·알람·가계부까지 살아남. 규칙은 md 복구와 동일: 기존 것은 절대 안
+// 건드리고, 지금 없는 것만(id 기준) 새로 추가함.
+function restoreFromRawData(rawDir) {
+  const readBackupJson = (name) => {
+    try {
+      const p = path.join(rawDir, name);
+      if (!fs.existsSync(p)) return null;
+      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch (err) {
+      console.error('데이터 원본 읽기 실패:', name, err);
+      return null;
+    }
+  };
+
+  // 주제: 없는 것만 추가(id 기준)
+  const bakTopics = readBackupJson('topics.json');
+  const topics = store.getTopics();
+  const topicIds = new Set(topics.map((t) => t.id));
+  let newTopicCount = 0;
+  (Array.isArray(bakTopics) ? bakTopics : []).forEach((t) => {
+    if (t && t.id && !topicIds.has(t.id)) {
+      topics.push(t);
+      topicIds.add(t.id);
+      newTopicCount += 1;
+    }
+  });
+
+  // 상위주제(카테고리) 이름 목록: 없는 것만 추가
+  const bakCategories = readBackupJson('categories.json');
+  if (Array.isArray(bakCategories) && bakCategories.length) {
+    const categories = store.getCategories();
+    const have = new Set(categories.map((c) => (typeof c === 'string' ? c : c && c.id)));
+    let added = false;
+    bakCategories.forEach((c) => {
+      const key = typeof c === 'string' ? c : c && c.id;
+      if (key && !have.has(key)) { categories.push(c); have.add(key); added = true; }
+    });
+    if (added) store.saveCategories(categories);
+  }
+
+  // 메모: 없는 것만 추가(id 기준) — 일정 날짜·알람·체크리스트·첨부 정보까지 원본 그대로
+  const bakMemos = readBackupJson('memos.json');
+  const memos = store.getMemos();
+  const memoIds = new Set(memos.map((m) => m.id));
+  let restoredCount = 0;
+  (Array.isArray(bakMemos) ? bakMemos : []).forEach((m) => {
+    if (m && m.id && !memoIds.has(m.id)) {
+      memos.push(m);
+      memoIds.add(m.id);
+      restoredCount += 1;
+    }
+  });
+
+  // 가계부: 분류·지출 기록 다 없는 것만 추가(id 기준)
+  const bakLedger = readBackupJson('ledger.json');
+  let ledgerCount = 0;
+  if (bakLedger && typeof bakLedger === 'object') {
+    const ledger = store.getLedger();
+    const catIds = new Set(ledger.categories.map((c) => c.id));
+    (Array.isArray(bakLedger.categories) ? bakLedger.categories : []).forEach((c) => {
+      if (c && c.id && !catIds.has(c.id)) { ledger.categories.push(c); catIds.add(c.id); }
+    });
+    const entryIds = new Set(ledger.entries.map((e) => e.id));
+    (Array.isArray(bakLedger.entries) ? bakLedger.entries : []).forEach((e) => {
+      if (e && e.id && !entryIds.has(e.id)) {
+        ledger.entries.push(e);
+        entryIds.add(e.id);
+        ledgerCount += 1;
+      }
+    });
+    store.saveLedger(ledger);
+    broadcastLedgerUpdated();
+  }
+
+  store.saveTopics(topics);
+  store.saveMemos(memos);
+  broadcastTopicsUpdated();
+  broadcastMemosUpdated();
+  return { canceled: false, count: restoredCount, topicCount: newTopicCount, ledgerCount };
+}
 
 // 백업 폴더에서 다시 불러오기(복구). 폴더 안의 주제별 하위폴더를 주제로, 그 안의 md/txt
 // 파일 하나하나를 메모로 되살림. 기존 주제/메모는 절대 건드리지 않고 "새로 추가"만 함
@@ -1706,11 +2635,18 @@ ipcMain.handle('memos:restoreFromBackup', async () => {
     });
   }
 
-  // 하위 폴더까지 전부 뒤져서 .md / .txt 파일을 다 찾음("첨부" 폴더는 이미지 원본 폴더라 제외)
+  // "데이터원본" 폴더(우리가 백업 때 만든 원본 JSON)가 있으면 그걸로 복구 —
+  // md 파싱보다 정확하고, 일정 날짜·알람·가계부 기록까지 전부 살아남
+  const rawDir = path.join(baseDir, '데이터원본');
+  if (fs.existsSync(path.join(rawDir, 'memos.json'))) {
+    return restoreFromRawData(rawDir);
+  }
+
+  // 하위 폴더까지 전부 뒤져서 .md / .txt 파일을 다 찾음("첨부"·"데이터원본" 폴더는 제외)
   const files = [];
   function walk(dir) {
     fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
-      if (entry.isDirectory() && entry.name === '첨부') return;
+      if (entry.isDirectory() && (entry.name === '첨부' || entry.name === '데이터원본')) return;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (/\.(md|txt)$/i.test(entry.name)) files.push(full);
@@ -1809,8 +2745,8 @@ ipcMain.handle('memos:restoreFromBackup', async () => {
 
   store.saveTopics(topics);
   store.saveMemos(memos);
-  if (widgetWindow) widgetWindow.webContents.send('topics:updated');
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastTopicsUpdated();
+  broadcastMemosUpdated();
 
   return { canceled: false, count: restoredCount, topicCount: newTopicCount };
 });
@@ -1826,7 +2762,8 @@ ipcMain.handle('obsidian:suggestFileName', (event, memoId) => {
     vaultPath: settings.vaultPath,
     topic,
     title: memo.title,
-    rule: settings.exportNameRule
+    rule: settings.exportNameRule,
+    scheduleAt: (memo.useCalendar && memo.scheduleAt) ? memo.scheduleAt : null
   });
 });
 
@@ -1850,8 +2787,10 @@ ipcMain.handle('obsidian:export', (event, { memoId, customFileName, extraTags })
     customFileName,
     attachments: memo.attachments || [],
     checklist: memo.checklist || [],
+    tables: memo.tables || [],
     attachDir: ATTACH_DIR(),
-    overwritePath: memo.obsidian && memo.obsidian.filePath ? memo.obsidian.filePath : undefined
+    overwritePath: memo.obsidian && memo.obsidian.filePath ? memo.obsidian.filePath : undefined,
+    scheduleAt: (memo.useCalendar && memo.scheduleAt) ? memo.scheduleAt : null
   });
 
   // exportedVersion에 지금 시점의 updatedAt을 같이 저장해둠 — 렌더러(memo.js)가 나중에
@@ -1859,7 +2798,7 @@ ipcMain.handle('obsidian:export', (event, { memoId, customFileName, extraTags })
   // (MD내보내기 버튼을 흐리게 바꿨다가 실제 수정이 생기면 다시 눌리게 하는 기준)
   memo.obsidian = { saved: true, filePath, exportedVersion: memo.updatedAt || null };
   store.saveMemos(memos);
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
 
   // "메모 연결" 기능(다른 메모에 [[링크]] 걸기)에서 고를 수 있도록 내보내기 기록을 남김.
   // 메모 자체가 나중에 "전송 후 삭제"로 없어져도 이 기록은 남아있어서 계속 링크 대상이 됨
@@ -1916,7 +2855,285 @@ ipcMain.handle('window:closeMemo', (event, memoId) => {
 
 ipcMain.handle('window:openSettings', () => createSettingsWindow());
 ipcMain.handle('window:openWidget', () => createWidgetWindow());
+ipcMain.handle('window:openCalendar', () => { createCalendarWindow(); });
 ipcMain.handle('window:openHelp', () => createHelpWindow());
+
+// (7단계) 달력 잠금/활성화 전환 — 렌더러가 더블클릭을 감지하면 활성화를 요청함.
+// 활성화: 포커스 가능하게 바꾸고 앞으로 가져옴. 잠금 복귀는 blur 핸들러가 처리.
+ipcMain.handle('calendar:setActive', (event, active) => {
+  if (!calendarWindow || calendarWindow.isDestroyed()) return;
+  if (active) {
+    calendarWindow.setFocusable(true);
+    calendarWindow.focus();
+    calendarWindow.moveTop();
+    calendarWindow.webContents.send('calendar:activeChanged', true);
+  } else {
+    calendarWindow.blur();
+  }
+});
+
+// 달력창이 달라는 날짜들("YYYY-MM-DD" 배열)의 음력 날짜를 한꺼번에 변환해서 돌려줌.
+// 칸마다 따로 부르면 느려서 한 번에 배치로 처리(인계서 규칙: 음력은 API 아닌 내장 변환).
+// 반환: { "YYYY-MM-DD": { m: 음력달, d: 음력일, leap: 윤달여부 } } (변환 불가한 날짜는 빠짐)
+const KoreanLunarCalendar = require('korean-lunar-calendar');
+ipcMain.handle('calendar:getLunarMap', (event, dateKeys) => {
+  const out = {};
+  if (!Array.isArray(dateKeys)) return out;
+  const conv = new KoreanLunarCalendar();
+  dateKeys.slice(0, 100).forEach((key) => { // 방어: 최대 100개(월간 그리드는 42개)
+    if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+    const [y, m, d] = key.split('-').map(Number);
+    try {
+      // 라이브러리 지원 범위(1000~2050) 밖이거나 잘못된 날짜면 false 반환 → 건너뜀
+      if (!conv.setSolarDate(y, m, d)) return;
+      const lunar = conv.getLunarCalendar();
+      if (lunar) out[key] = { m: lunar.month, d: lunar.day, leap: !!lunar.intercalation };
+    } catch (e) { /* 변환 실패한 날짜는 표시 안 함 */ }
+  });
+  return out;
+});
+
+// ---- 공휴일(특일정보 API, 태훈님 키 보유) ----
+// API 응답(JSON) → { "YYYY-MM-DD": "이름" } 맵으로 변환하는 순수 함수(DOM/네트워크 없이 테스트 가능).
+// 실패·빈 응답이면 빈 맵을 돌려줌 — 공휴일 기능이 안 돼도 달력 자체는 항상 정상 동작해야 함.
+function parseHolidayResponse(json) {
+  const days = {};
+  try {
+    const header = json && json.response && json.response.header;
+    if (!header || header.resultCode !== '00') return days; // 인증 실패 등 — 조용히 빈 맵
+    const items = json.response.body && json.response.body.items;
+    if (!items || items === '') return days; // 그 해 항목이 0개면 items가 빈 문자열로 옴
+    let list = items.item;
+    if (!list) return days;
+    if (!Array.isArray(list)) list = [list]; // 항목이 1개뿐이면 배열이 아니라 객체 하나로 옴
+    list.forEach((it) => {
+      if (!it || it.isHoliday !== 'Y' || !it.locdate) return;
+      const s = String(it.locdate);
+      if (s.length !== 8) return;
+      const key = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+      days[key] = it.dateName || '공휴일';
+    });
+  } catch (e) { /* 파싱 실패해도 빈 맵으로 — 달력은 계속 동작 */ }
+  return days;
+}
+
+// 특일정보 API에서 그 해 공휴일을 받아옴. serviceKey는 태훈님이 ⚙설정에 입력한 값을 그대로
+// URL에 붙임(공공데이터포털의 "인증키(Encoding)" 형식 — 추가 인코딩하면 이중 인코딩으로 깨짐).
+async function fetchHolidayYear(year, apiKey) {
+  const params = new URLSearchParams({ solYear: String(year), numOfRows: '100', _type: 'json' });
+  const url = `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?serviceKey=${apiKey}&${params.toString()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('공휴일 API HTTP ' + res.status);
+  const json = await res.json();
+  return parseHolidayResponse(json);
+}
+
+// 캐시가 아직 쓸만한지 판정(순수 함수 — 테스트하기 쉽게 분리). 지난 연도는 다시 안 바뀌니
+// 캐시가 있으면 무조건 신선한 것으로 침(영구 캐시). 올해/미래 연도만 refreshMs 지나면 다시 확인
+// (임시공휴일이 뒤늦게 발표되는 경우 대비).
+function isHolidayCacheFresh(entry, year, currentYear, nowMs, refreshMs) {
+  if (!entry) return false;
+  if (year < currentYear) return true;
+  const age = nowMs - new Date(entry.fetchedAt).getTime();
+  return Number.isFinite(age) && age < refreshMs;
+}
+
+// 렌더러가 연도를 물어보면 위 판정에 따라 캐시를 쓰거나 다시 받아옴. 키가 없으면(태훈님이
+// 아직 ⚙설정에 안 넣었으면) 네트워크 요청 없이 조용히 빈 값(또는 기존 캐시)만 돌려줌.
+const HOLIDAY_REFRESH_MS = 12 * 60 * 60 * 1000;
+ipcMain.handle('calendar:getHolidays', async (event, year) => {
+  const y = Math.floor(Number(year));
+  if (!Number.isFinite(y)) return {};
+  const settings = store.getSettings();
+  const apiKey = (settings.calendar && settings.calendar.holidayApiKey) || '';
+  const cache = store.getHolidayCache();
+  const entry = cache[y];
+  const isFresh = isHolidayCacheFresh(entry, y, new Date().getFullYear(), Date.now(), HOLIDAY_REFRESH_MS);
+  if (isFresh) return entry.days;
+  if (!apiKey) return (entry && entry.days) || {};
+  try {
+    const days = await fetchHolidayYear(y, apiKey);
+    store.saveHolidayYear(y, days);
+    return days;
+  } catch (e) {
+    console.error('공휴일 조회 실패(기존 캐시로 대체):', e.message);
+    return (entry && entry.days) || {};
+  }
+});
+
+// ---------- IPC: 가계부(달력 가계부 모드) ----------
+// 지출 데이터는 ledger.json에만 저장 — 메모 데이터와 완전히 분리(인계서 규칙).
+// 바뀔 때마다 달력창에 'ledger:updated'를 보내 화면을 새로 그리게 함.
+function broadcastLedgerUpdated() {
+  if (calendarWindow && !calendarWindow.isDestroyed()) {
+    calendarWindow.webContents.send('ledger:updated');
+  }
+}
+
+ipcMain.handle('ledger:get', () => store.getLedger());
+
+ipcMain.handle('ledger:addEntry', (event, entry) => {
+  const ledger = store.getLedger();
+  const amount = Math.round(Number(entry && entry.amount));
+  if (!entry || !entry.date || !Number.isFinite(amount) || amount <= 0) return null;
+  const newEntry = {
+    id: randomUUID(),
+    date: String(entry.date).slice(0, 10),      // "YYYY-MM-DD"
+    categoryId: entry.categoryId || 'etc',
+    amount,
+    memo: typeof entry.memo === 'string' ? entry.memo.trim() : ''
+  };
+  ledger.entries.push(newEntry);
+  store.saveLedger(ledger);
+  broadcastLedgerUpdated();
+  return newEntry;
+});
+
+ipcMain.handle('ledger:updateEntry', (event, entry) => {
+  const ledger = store.getLedger();
+  const idx = ledger.entries.findIndex((e) => e.id === (entry && entry.id));
+  if (idx === -1) return null;
+  const amount = Math.round(Number(entry.amount));
+  ledger.entries[idx] = {
+    ...ledger.entries[idx],
+    ...(entry.date ? { date: String(entry.date).slice(0, 10) } : {}),
+    ...(entry.categoryId ? { categoryId: entry.categoryId } : {}),
+    ...(Number.isFinite(amount) && amount > 0 ? { amount } : {}),
+    ...(typeof entry.memo === 'string' ? { memo: entry.memo.trim() } : {})
+  };
+  store.saveLedger(ledger);
+  broadcastLedgerUpdated();
+  return ledger.entries[idx];
+});
+
+ipcMain.handle('ledger:deleteEntry', (event, entryId) => {
+  const ledger = store.getLedger();
+  ledger.entries = ledger.entries.filter((e) => e.id !== entryId);
+  store.saveLedger(ledger);
+  broadcastLedgerUpdated();
+  return true;
+});
+
+// 가계부 설정(월급날·예산·고정지출) 부분 병합 저장 — ledger.json의 settings만 건드림.
+// store.getLedger()가 이상한 값을 걸러주므로 여기선 합치기만 하면 됨.
+ipcMain.handle('ledger:saveSettings', (event, patch) => {
+  const ledger = store.getLedger();
+  ledger.settings = { ...ledger.settings, ...(patch || {}) };
+  store.saveLedger(ledger);
+  // 고정 지출을 새로 등록/수정했다면 이번 달 치를 바로 기입해줌(날짜가 이미 지났으면)
+  applyFixedExpenses();
+  broadcastLedgerUpdated();
+  return store.getLedger().settings;
+});
+
+// 위트 멘트 문구 읽기(데이터 폴더의 멘트.json — 없으면 기본 멘트로 생성됨)
+ipcMain.handle('ledger:getMents', () => store.getMents());
+
+// 멘트.json을 메모장 등 기본 프로그램으로 열어줌(태훈님이 문구를 직접 수정할 수 있게).
+// 파일이 아직 없으면 getMents()가 기본 멘트로 만들어준 뒤 열림
+ipcMain.handle('ledger:openMentsFile', () => {
+  store.getMents();
+  const p = store.getDataFilePath('ments');
+  if (p) shell.openPath(p);
+  return true;
+});
+
+// 가계부 엑셀 내보내기: 전체 지출 기록을 CSV(엑셀에서 바로 열림)로 저장.
+ipcMain.handle('ledger:exportCsv', async () => {
+  const ledger = store.getLedger();
+  const catName = {};
+  ledger.categories.forEach((c) => { catName[c.id] = c.name; });
+  const rows = [['날짜', '분류', '금액', '메모', '자동기입']];
+  ledger.entries
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .forEach((e) => {
+      rows.push([
+        e.date,
+        catName[e.categoryId] || '(삭제된 분류)',
+        e.amount,
+        e.memo || '',
+        e.fixedId ? '고정지출' : ''
+      ]);
+    });
+  const esc = (v) => {
+    const t = String(v == null ? '' : v).replace(/"/g, '""');
+    return /[",\n]/.test(t) ? `"${t}"` : t;
+  };
+  // BOM(0xFEFF) 표식을 맨 앞에 붙이면 엑셀이 한글을 안 깨뜨리고 읽음
+  const bom = String.fromCharCode(0xFEFF);
+  const csv = bom + rows.map((r) => r.map(esc).join(',')).join('\r\n');
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const result = await dialog.showSaveDialog({
+    title: '가계부 엑셀(CSV)로 내보내기',
+    defaultPath: `가계부_${stamp}.csv`,
+    filters: [{ name: 'CSV (엑셀에서 열림)', extensions: ['csv'] }]
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  fs.writeFileSync(result.filePath, csv, 'utf-8');
+  return { canceled: false, path: result.filePath, count: ledger.entries.length };
+});
+
+// 고정 지출 자동 기입: 매달 등록한 날짜(N일)가 되면 지출 기록에 자동으로 추가함.
+// - 이번 달만 확인(앱을 한 달 내내 안 켰으면 그 달은 건너뜀 — 단순하고 예측 가능하게)
+// - 그 달에 N일이 없으면(예: 31일 등록 + 2월) 말일로 맞춤. setMonth 안 씀(인계서 규칙)
+// - 중복 방지: settings.fixedApplied["고정지출id:YYYY-MM"] 표식 — 한 번 기입한 달은
+//   다시 안 넣음(자동 기입된 걸 사용자가 지워도 되살아나지 않음)
+function applyFixedExpenses() {
+  const ledger = store.getLedger();
+  const s = ledger.settings;
+  if (!Array.isArray(s.fixed) || !s.fixed.length) return;
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0~11
+  const todayDay = now.getDate();
+  const ym = `${y}-${String(m + 1).padStart(2, '0')}`;
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  let changed = false;
+  s.fixed.forEach((f) => {
+    const amount = Math.round(Number(f && f.amount));
+    if (!f || !f.id || !Number.isFinite(amount) || amount <= 0) return;
+    const day = Math.min(Math.max(1, Math.floor(Number(f.day) || 1)), 31);
+    const applyDay = Math.min(day, daysInMonth); // 말일 맞춤
+    if (todayDay < applyDay) return; // 아직 날짜 안 됨
+    const applyDate = `${ym}-${String(applyDay).padStart(2, '0')}`;
+    // 등록한 날보다 앞선 날짜는 기입 안 함 — 등록 도중(날짜를 아직 못 바꾼 상태)에
+    // 이번 달 지난 날짜로 잘못 들어가는 사고 방지. 다음 달부터는 정상 기입됨
+    if (typeof f.createdAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f.createdAt) && applyDate < f.createdAt) return;
+    const key = `${f.id}:${ym}`;
+    if (s.fixedApplied[key]) return; // 이번 달은 이미 기입함
+    ledger.entries.push({
+      id: randomUUID(),
+      date: applyDate,
+      categoryId: f.categoryId || 'etc',
+      amount,
+      memo: (typeof f.memo === 'string' && f.memo.trim()) ? f.memo.trim() : '고정 지출',
+      fixedId: f.id // 자동 기입 표식(수동 기록과 구분용)
+    });
+    s.fixedApplied[key] = true;
+    changed = true;
+  });
+  if (changed) {
+    store.saveLedger(ledger);
+    broadcastLedgerUpdated();
+  }
+}
+
+// 분류 목록 통째 저장(설정창에서 이름·색 수정/추가/삭제 후 호출).
+// 지출 기록(entries)은 건드리지 않음. 삭제된 분류를 쓰던 기록은 색만 회색으로 보이게 됨(기록은 보존).
+ipcMain.handle('ledger:saveCategories', (event, categories) => {
+  if (!Array.isArray(categories) || !categories.length) return null;
+  const ledger = store.getLedger();
+  ledger.categories = categories.map((c) => ({
+    id: c.id || randomUUID(),
+    name: String(c.name || '').trim() || '(이름 없음)',
+    color: c.color || '#8A8577'
+  }));
+  store.saveLedger(ledger);
+  broadcastLedgerUpdated();
+  return ledger.categories;
+});
 
 // "메모 연결" 검색 팝업 열기/닫기 + 목록에서 하나 고르면 원래 메모창에 [[링크]]를 꽂아줌
 ipcMain.handle('window:openMemoLink', (event, memoId) => {
@@ -1934,6 +3151,33 @@ ipcMain.handle('memoLink:choose', (event, fileNameNoExt) => {
     if (win) win.webContents.send('memoLink:selected', fileNameNoExt);
   }
   if (memoLinkWindow) memoLinkWindow.close();
+});
+
+// "다른 주제로 이동" 팝업 열기/닫기 + 목록 데이터 제공 + 하나 고르면 원래 메모창에 알려줌
+// (실제로 주제를 옮기는 처리는 기존처럼 메모창 쪽(memos:setTopic)에서 함 — 팝업은 "뭘 골랐는지"만 전달)
+ipcMain.handle('window:openMoveTopic', (event, memoId) => {
+  const anchorWin = BrowserWindow.fromWebContents(event.sender);
+  createMoveTopicWindow(memoId, anchorWin);
+});
+
+ipcMain.handle('window:closeMoveTopic', () => {
+  if (moveTopicWindow) moveTopicWindow.close();
+});
+
+ipcMain.handle('moveTopic:getData', () => {
+  const topics = store.getTopics();
+  const memos = store.getMemos();
+  const memo = memos.find((m) => m.id === moveTopicTargetMemoId);
+  // 지금 속한 주제는 목록에서 빼고 보여줌(같은 주제로 "이동"할 필요는 없으니까)
+  return topics.filter((t) => !memo || t.id !== memo.topicId);
+});
+
+ipcMain.handle('moveTopic:choose', (event, topicId) => {
+  if (moveTopicTargetMemoId) {
+    const win = memoWindows.get(moveTopicTargetMemoId);
+    if (win) win.webContents.send('moveTopic:selected', topicId);
+  }
+  if (moveTopicWindow) moveTopicWindow.close();
 });
 
 // 위젯 🔍 검색 팝업 열기/닫기 + 목록에서 하나 고르면 그 메모창을 열어주고 팝업은 닫힘
@@ -1962,6 +3206,44 @@ ipcMain.handle('window:refocusSelf', (event) => {
   }
 });
 
+// 위젯 폭이 바뀔 때, 손잡이+완전축소버튼이 오른쪽에 있으면(설정 > 위젯, handlePosition)
+// 오른쪽 테두리는 그 자리에 고정해두고 왼쪽으로 늘고 줄게 함. 기본값인 왼쪽 손잡이는
+// 지금까지와 똑같이 왼쪽 테두리를 고정한 채로 오른쪽이 늘고 줄어듦(동작 변화 없음).
+// setSize는 항상 왼쪽 위(x,y)를 고정한 채 크기만 바꾸므로, 오른쪽 고정이 필요할 때만
+// setBounds로 x좌표까지 같이 계산해서 넘겨줌(그 외엔 완전히 예전과 동일하게 setSize만 사용)
+// (1.8.16 신규) 위젯이 지금 있는 모니터에서 위쪽/아래쪽 중 어디에 더 가까운지 계산.
+// "더 가까운 쪽"이 아니라 "남는 공간이 더 적은 쪽"으로 판단함 — 위로 붙어있으면 아래쪽에
+// 공간이 넉넉하니 지금처럼 아래로 늘어나면 되고(top), 아래로 붙어있으면 위쪽에 공간이
+// 넉넉하니 위로 늘어나야(bottom) 화면 밖으로 안 나감
+function computeWidgetVerticalAnchor(win) {
+  const bounds = win.getBounds();
+  const work = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
+  const spaceBelow = (work.y + work.height) - (bounds.y + bounds.height);
+  const spaceAbove = bounds.y - work.y;
+  return spaceAbove > spaceBelow ? 'bottom' : 'top';
+}
+
+// 위젯 가로(손잡이 위치 left/right 설정)·세로(widgetVerticalAnchor) 중 필요한 쪽만 반대편
+// 모서리를 고정한 채 크기를 바꿈. 기본(왼쪽+위쪽)은 예전처럼 setSize만 씀(동작 변화 없음)
+function resizeWidgetKeepingAnchor(win, width, height) {
+  const settings = store.getSettings();
+  const w = Math.round(width);
+  const h = Math.round(height);
+  const anchorRight = settings.widget.handlePosition === 'right';
+  const anchorBottom = widgetVerticalAnchor === 'bottom';
+  if (!anchorRight && !anchorBottom) {
+    win.setSize(w, h);
+    return;
+  }
+  const bounds = win.getBounds();
+  win.setBounds({
+    x: anchorRight ? bounds.x + (bounds.width - w) : bounds.x,
+    y: anchorBottom ? bounds.y + (bounds.height - h) : bounds.y,
+    width: w,
+    height: h
+  });
+}
+
 ipcMain.handle('widget:resize', (event, { width, height }) => {
   const settings = store.getSettings();
   if (!widgetWindow || !settings.widget.autoResize) return;
@@ -1972,9 +3254,9 @@ ipcMain.handle('widget:resize', (event, { width, height }) => {
   if (wasLocked) widgetWindow.setResizable(true);
   if (settings.widget.collapsed) {
     // 접힘 상태에서도 폭(주제 버튼 개수에 맞춤)은 자동 조절 허용, 높이는 항상 접힘 높이로 고정
-    widgetWindow.setSize(Math.round(width), WIDGET_COLLAPSED_HEIGHT);
+    resizeWidgetKeepingAnchor(widgetWindow, width, WIDGET_COLLAPSED_HEIGHT);
   } else {
-    widgetWindow.setSize(Math.round(width), Math.round(height));
+    resizeWidgetKeepingAnchor(widgetWindow, width, height);
   }
   if (settings.widget.handleOnly) widgetWindow.setResizable(false);
 });
@@ -2011,11 +3293,11 @@ ipcMain.handle('widget:setCollapsed', (event, value) => {
     if (collapsed) {
       // 접을 땐 지금 폭 그대로 유지(렌더러가 곧이어 주제 버튼 수에 맞춰 다시 조정함)
       const [width] = widgetWindow.getSize();
-      widgetWindow.setSize(width, WIDGET_COLLAPSED_HEIGHT);
+      resizeWidgetKeepingAnchor(widgetWindow, width, WIDGET_COLLAPSED_HEIGHT);
     } else {
       // 펼 땐 접힘 상태에서 자동으로 늘어나 있던 폭이 아니라, 펼친 상태의 "진짜" 폭으로 복원
       const restoreWidth = settings.widget.expandedWidth || settings.widget.width;
-      widgetWindow.setSize(restoreWidth, settings.widget.expandedHeight || settings.widget.height);
+      resizeWidgetKeepingAnchor(widgetWindow, restoreWidth, settings.widget.expandedHeight || settings.widget.height);
     }
   }
   return settings.widget;
@@ -2088,7 +3370,7 @@ ipcMain.handle('memos:toggleTopicAlwaysOnTop', (event, topicId) => {
     }
   });
   store.saveMemos(memos);
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return nowPinned;
 });
 
@@ -2127,7 +3409,13 @@ ipcMain.handle('memos:removeAttachment', (event, { memoId, storedName }) => {
   memos[idx].attachments = (memos[idx].attachments || []).filter(
     (a) => a.storedName !== storedName
   );
-  memos[idx].content = (memos[idx].content || '').split(`![[${storedName}]]`).join('');
+  // (0.19.2) 크기가 붙은 "![[파일명|400]]" 도 같이 지워야 함. 줄 전체와 뒤 줄바꿈까지 지워서
+  // 그림이 있던 자리에 빈 줄이 남지 않게 함(캡션 줄은 글자이므로 일부러 남겨둠)
+  const escaped = String(storedName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  memos[idx].content = (memos[idx].content || '').replace(
+    new RegExp(`[ \\t]*!\\[\\[${escaped}(\\|\\d+)?\\]\\][ \\t]*\\n?`, 'g'),
+    ''
+  );
   memos[idx].updatedAt = new Date().toISOString(); // 첨부도 MD내보내기에 포함되므로 갱신
   store.saveMemos(memos);
 
@@ -2138,7 +3426,7 @@ ipcMain.handle('memos:removeAttachment', (event, { memoId, storedName }) => {
     console.error('첨부파일 삭제 실패:', err);
   }
 
-  if (widgetWindow) widgetWindow.webContents.send('memos:updated');
+  broadcastMemosUpdated();
   return memos[idx];
 });
 
@@ -2227,6 +3515,21 @@ ipcMain.handle('attachments:saveFromClipboard', (event, { base64, ext }) => {
   const buffer = resizeImageBufferIfNeeded(Buffer.from(base64, 'base64'), safeExt);
   fs.writeFileSync(path.join(attachDir, storedName), buffer);
   return { storedName, originalName: `붙여넣기${safeExt}`, isImage: true };
+});
+
+// 이미지 그림그리기(선/화살표/번호) 결과로 기존 첨부 이미지 파일을 그대로 덮어씀.
+// storedName(파일명)은 안 바뀌므로 memo.attachments 쪽 메타데이터는 손댈 필요 없음 — 파일 내용만 교체됨
+ipcMain.handle('attachments:overwriteImage', (event, { storedName, base64 }) => {
+  try {
+    const attachDir = ATTACH_DIR();
+    const ext = path.extname(storedName) || '.png';
+    const buffer = resizeImageBufferIfNeeded(Buffer.from(base64, 'base64'), ext);
+    fs.writeFileSync(path.join(attachDir, storedName), buffer);
+    return true;
+  } catch (err) {
+    console.error('이미지 그림그리기 저장 실패:', err);
+    return false;
+  }
 });
 
 // 설정 화면의 "안 쓰는 첨부파일 정리" 버튼에서 호출. 지금 어디서도 안 쓰이는 파일을

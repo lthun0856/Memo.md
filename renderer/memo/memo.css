@@ -10,7 +10,7 @@
   --accent: #C9A24B;
 }
 
-html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif; background: transparent; }
+html, body { height: 100%; overflow: hidden; font-family: var(--app-font, -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif); background: transparent; }
 
 .card {
   height: 100vh;
@@ -72,8 +72,9 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Malgun
 /* ---- 설정창이 열려있는 동안: 이 메모의 편집 전체를 잠금 (접기/닫기 버튼은 예외, titlebar-persistent-actions에 있어서 원래 안 잠김) ---- */
 .card.locked .titlebar-actions,
 .card.locked .bottombar,
-.card.locked .canvas-layer,
 .card.locked .checklist-area,
+.card.locked .schedule-area,
+.card.locked .alarm-area,
 .card.locked .topic-chip {
   pointer-events: none;
   opacity: 0.45;
@@ -172,6 +173,8 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Malgun
 /* ---- 접힘 상태: 타이틀바만 남기고 나머지는 숨김, 주제/제목은 항상 보이게 함 ---- */
 .card.collapsed .editor-area,
 .card.collapsed .checklist-area,
+.card.collapsed .schedule-area,
+.card.collapsed .alarm-area,
 .card.collapsed .attachment-strip,
 .card.collapsed .bottombar {
   display: none;
@@ -280,7 +283,8 @@ body.md-off .bb-quick { flex: 0 1 auto; }
   background: var(--overlay);
 }
 
-textarea {
+textarea,
+.content-editor {
   flex: 1;
   width: 100%;
   min-height: 0;
@@ -297,105 +301,214 @@ textarea {
   scrollbar-color: var(--line) transparent; /* color-mix 미지원 환경 대비 폴백 */
   scrollbar-color: color-mix(in srgb, var(--paper) 90%, black 10%) transparent;
 }
-textarea::-webkit-scrollbar { width: 6px; }
-textarea::-webkit-scrollbar-track { background: transparent; }
-textarea::-webkit-scrollbar-thumb {
+textarea::-webkit-scrollbar,
+.content-editor::-webkit-scrollbar { width: 6px; }
+textarea::-webkit-scrollbar-track,
+.content-editor::-webkit-scrollbar-track { background: transparent; }
+textarea::-webkit-scrollbar-thumb,
+.content-editor::-webkit-scrollbar-thumb {
   background: var(--line); /* color-mix 미지원 환경 대비 폴백 */
   background: color-mix(in srgb, var(--paper) 90%, black 10%);
   border-radius: 3px;
 }
-textarea::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+textarea::-webkit-scrollbar-button,
+.content-editor::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 textarea::-webkit-scrollbar-button:vertical:start,
-textarea::-webkit-scrollbar-button:vertical:end { display: none; height: 0; }
-textarea::-webkit-scrollbar-corner { background: transparent; }
+textarea::-webkit-scrollbar-button:vertical:end,
+.content-editor::-webkit-scrollbar-button:vertical:start,
+.content-editor::-webkit-scrollbar-button:vertical:end { display: none; height: 0; }
+textarea::-webkit-scrollbar-corner,
+.content-editor::-webkit-scrollbar-corner { background: transparent; }
 
-/* ---- 붙여넣은/첨부한 이미지가 그림판처럼 본문 위에 자유롭게 놓이는 레이어 ---- */
-.canvas-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none; /* 빈 공간은 클릭이 텍스트영역으로 그대로 전달됨 */
-  overflow: hidden;
+/* ---- (1.18.0) 본문 실시간 서식 편집기 ----
+   내용은 마크다운 원문 그대로 들어있고, 기호(**, == 등)는 .mk 로 감싸서 숨김.
+   커서가 있는 줄(.cur)에서만 기호를 다시 보여줌 — 그래야 그 줄을 고칠 때
+   기호 위치를 알 수 있고 커서가 숨은 글자 속으로 빨려들어가지 않음 ---- */
+.content-editor {
+  position: relative;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-modify: read-write-plaintext-only;
 }
-.canvas-image {
-  position: absolute;
-  pointer-events: auto;
-  width: 140px;
-  height: 100px;
+.content-editor .ln { min-height: 1.6em; }
+.content-editor .mk { display: none; }
+/* 마크다운 기호는 항상 숨김. 예외는 링크 주소(.mk-show)뿐 — 나중에 주소를 확인·수정할
+   방법이 있어야 해서 커서가 닿은 줄에서만 보여줌.
+   기호가 안 보이는 대신, 지우기로 기호가 반쪽 나는 건 mdeditor.js의 handleDeleteKey가 막아줌 */
+.content-editor .ln.cur .mk-show {
+  display: inline;
+  color: var(--muted);
+  opacity: 0.45;
+  font-weight: 400;
+  font-style: normal;
+  text-decoration: none;
 }
-.canvas-image-body {
-  min-width: 60px;
-  min-height: 60px;
-  max-width: 360px;
-  max-height: 360px;
-  overflow: hidden;
-  resize: both;
-  cursor: move;
-  border-radius: 6px;
-  outline: 1px solid var(--line);
-  outline-offset: -1px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+.content-editor .md-h1 { font-size: 1.55em; font-weight: 700; line-height: 1.35; }
+.content-editor .md-h2 { font-size: 1.3em; font-weight: 700; line-height: 1.4; }
+.content-editor .md-h3 { font-size: 1.12em; font-weight: 700; line-height: 1.45; }
+.content-editor .md-quote {
+  border-left: 3px solid var(--line);
+  padding-left: 8px;
+  color: var(--muted);
+}
+.content-editor .md-hr { color: var(--muted); opacity: 0.55; }
+.content-editor .md-fence { color: var(--muted); opacity: 0.7; font-family: Consolas, monospace; }
+.content-editor .md-code {
+  font-family: Consolas, 'D2Coding', monospace;
+  font-size: 0.94em;
+  background: var(--overlay);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.content-editor mark.md-hl {
+  border-radius: 2px;
+  padding: 0 1px;
+  color: inherit;
+}
+.content-editor mark.md-hl-y { background: #FFF3A3; }
+.content-editor .md-link { color: #3D7BD1; text-decoration: underline; }
+
+/* 체크리스트: 본문 안의 "- [ ] 할일" 줄에 진짜 체크박스를 그림.
+   체크박스는 글자가 아니므로 저장되는 마크다운에는 안 들어감(상태는 [ ] / [x] 글자가 가짐) */
+/* 체크박스 색은 --accent(= 메모지 색)를 쓰면 안 됨. 흰 메모지에서 흰 체크가 되어 안 보였음
+   (2026-08-14 태훈님 확인). 항상 글자색(--ink)을 쓰면 어떤 메모지 색에서도 잘 보임 */
+.content-editor .md-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 5px 0 0;
+  padding: 0;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 3px;
+  background: transparent;
+  vertical-align: -2px;
+  cursor: pointer;
+  position: relative;
+  flex: none;
+}
+.content-editor .md-checkbox:hover { border-color: var(--ink); }
+.content-editor .md-checkbox:checked {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.content-editor .md-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 6.5px;
+  border: solid var(--paper);
+  border-width: 0 1.8px 1.8px 0;
+  transform: rotate(43deg);
+}
+/* 항목 글이 길어서 다음 줄로 넘어갈 때 체크박스 아래로 파고들지 않고
+   글자 시작 위치에 맞춰 들여쓰기됨 (체크박스 13px + 여백 5px = 18px) */
+.content-editor .ln.md-task {
+  padding-left: 18px;
+  text-indent: -18px;
+}
+.content-editor .md-task-done { color: var(--ink-soft); text-decoration: line-through; }
+.content-editor .md-wikilink { color: #7A5CC4; }
+
+/* ---- (0.19.1) 본문 안의 표 ----
+   "| 가 | 나 |" 줄의 세로줄(|)은 다른 마크다운 기호처럼 .mk 로 숨기고, 칸만
+   table-cell 로 만든다. 이어진 table-row 들은 브라우저가 알아서 하나의 표 상자로
+   묶어주므로(익명 표 상자) 줄마다 칸 폭이 저절로 맞는다.
+   → 화면에는 진짜 표로 보이지만 저장되는 글자는 마크다운 원문 그대로다. */
+.content-editor .ln.md-trow {
+  display: table-row;
+  min-height: 0;
+}
+/* 구분선 줄("| --- |")은 바로 위가 표 줄일 때만 숨김.
+   위에 표가 없는 홀로 있는 구분선까지 숨기면 글자가 사라진 것처럼 보이기 때문 */
+.content-editor .ln.md-trow + .ln.md-trow-sep { display: none; }
+.content-editor .md-cell {
+  display: table-cell;
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  min-width: 2.4em;
+  vertical-align: top;
+}
+/* 첫 줄(머리줄)은 살짝 진하게 — 표처럼 보이게 */
+.content-editor .ln.md-trow:has(+ .ln.md-trow-sep) .md-cell {
+  background: var(--overlay);
+  font-weight: 600;
 }
 
-/* 이미지에 딸린 설명칸. 이미지와는 완전히 별개의 위치를 가지는 독립된 상자라 원하는
-   방향 아무 곳에나 뗄 수 있고, 이미지를 옮기면 상대위치를 유지한 채 같이 따라감(memo.js) */
-.caption-box {
+/* 안내문구(placeholder): 실제 글자가 아니라 CSS로만 그려서 저장 내용에 안 섞임 */
+.content-editor.is-empty::before {
+  content: attr(data-placeholder);
   position: absolute;
-  pointer-events: auto;
-}
-.canvas-image-caption {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-width: 60px;
-  min-height: 22px;
-  max-width: 360px;
-  max-height: 260px;
-  box-sizing: border-box;
-  border: none;
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 10.5px;
-  font-family: inherit;
-  line-height: 1.4;
-  padding: 4px 6px;
-  border-radius: 6px;
-  outline: 1px solid var(--line);
-  outline-offset: -1px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
-  resize: both;
-  overflow: auto;
-  cursor: text;
-}
-.canvas-image-caption::placeholder { color: var(--ink-soft); opacity: 0.7; }
-/* 설명칸을 옮길 때 잡는 손잡이. 텍스트 입력칸 밖(모서리)에 살짝 걸쳐서 글자 입력과 헷갈리지 않게 함 */
-.caption-move-handle {
-  position: absolute;
-  top: -8px; left: -8px;
-  width: 15px; height: 15px;
-  border-radius: 50%;
-  background: var(--ink-soft);
-  color: var(--paper);
-  font-size: 9px;
-  line-height: 1;
-  cursor: move;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-}
-.card:not(:focus-within) .caption-move-handle { display: none; }
-.canvas-image img {
-  width: 100%; height: 100%;
-  object-fit: cover;
-  display: block;
+  left: 14px;
+  top: 12px;
+  color: var(--muted);
   pointer-events: none;
 }
-/* 삭제 버튼은 리사이즈영역(overflow:hidden) 밖의 바깥 래퍼에 둬서 잘리지 않고 모서리 밖으로 튀어나오게 함 */
-.canvas-image .attachment-remove {
-  top: -6px;
-  right: -6px;
+
+/* ---- 형광펜 색 고르기 ---- */
+.hl-wrap { position: relative; display: inline-flex; }
+.hl-palette {
+  position: fixed;   /* 툴바/하단바의 overflow:hidden 에 잘리지 않게 카드 바깥에 띄움 */
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  z-index: 900;
 }
-.card:not(:focus-within) .canvas-image .attachment-remove { display: none; }
+.hl-palette[hidden] { display: none; }
+.hl-swatch {
+  width: 17px;
+  height: 17px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+.hl-swatch:hover { outline: 2px solid var(--accent, #C9A24B); outline-offset: 1px; }
+
+/* ---- 본문 안 이미지 (3단계, 0.19.2) ----
+   0.19.1까지는 이미지가 .canvas-layer 위에 절대좌표로 떠 있었음(자유 배치).
+   이제는 본문의 "![[그림.png|400]]" 한 줄이라 글자처럼 흐름을 따라 밀린다.
+   옛 스타일(.canvas-layer / .canvas-image* / .caption-box*)은 전부 삭제함 */
+.ln.md-image { line-height: 0; }          /* 그림 위아래에 빈 줄처럼 뜨는 여백 제거 */
+.md-imgbox {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+.md-img {
+  display: block;
+  max-width: 100%;
+  height: auto;            /* 폭만 저장하고 높이는 원본 비율 자동 — 찌그러질 수가 없음 */
+  border-radius: 6px;
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+  cursor: pointer;         /* 누르면 그림그리기 창 */
+}
+/* 크기 손잡이. 메모지 색(--accent)이 아니라 글자색(--ink-soft)을 쓰는 이유는
+   흰 메모지에서 안 보이는 사고가 예전에 있었기 때문(인계서 참고) */
+.md-img-resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--ink-soft);
+  border: 1px solid var(--paper);
+  cursor: nwse-resize;
+  z-index: 2;
+}
+.card:not(:focus-within) .md-img-resize { display: none; }
 
 /* ---- 체크리스트: textarea 안에서는 실제 체크박스/취소선을 못 그리기 때문에,
    이미지 첨부처럼 본문과는 별도인 목록 영역으로 둠. 툴바 바로 아래(본문 textarea보다 위)에
@@ -407,6 +520,142 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   flex-shrink: 0;
 }
 .checklist-area[hidden] { display: none; }
+
+/* ---- 일정 날짜(달력) 칸 ---- */
+.schedule-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px dashed var(--line);
+  flex-shrink: 0;
+}
+.schedule-area[hidden] { display: none; }
+.schedule-label {
+  font-size: 11px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.schedule-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+.schedule-text.invalid {
+  border-color: #d9534f;
+  color: #d9534f;
+}
+.schedule-input {
+  flex-shrink: 0;
+  width: 34px;
+  font-size: 12px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  accent-color: var(--accent);
+  overflow: hidden;
+}
+/* 숫자칸이 주 입력이므로 달력칸은 날짜 글자를 숨기고 달력 아이콘(버튼)만 남김 */
+.schedule-input::-webkit-datetime-edit { display: none; }
+.schedule-input::-webkit-inner-spin-button { display: none; }
+.schedule-input::-webkit-clear-button { display: none; }
+.schedule-input::-webkit-calendar-picker-indicator { margin: 0; cursor: pointer; }
+.schedule-clear-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.schedule-clear-btn:hover { opacity: 1; }
+.calendar-toggle-btn.active { background: var(--ink); color: var(--paper); }
+
+/* 알람 버튼(일정칸 안) + 알람 설정칸 */
+.schedule-alarm-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.5;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 3px;
+  cursor: pointer;
+}
+.schedule-alarm-btn:hover { opacity: 1; }
+.schedule-alarm-btn.active { opacity: 1; }
+.schedule-alarm-btn.on { opacity: 1; background: var(--overlay); border-radius: 3px; }
+
+.alarm-area {
+  padding: 6px 10px;
+  border-bottom: 1px dashed var(--line);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.alarm-area[hidden] { display: none; }
+.alarm-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.alarm-enable-row { cursor: pointer; }
+.alarm-enable-row input { cursor: pointer; }
+.alarm-hint,
+.alarm-field-label {
+  opacity: 0.7;
+}
+.alarm-field-label {
+  flex-shrink: 0;
+  width: 44px;
+}
+.alarm-hint {
+  font-size: 10px;
+  opacity: 0.55;
+}
+.alarm-detail.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.alarm-num {
+  width: 34px;
+  font-size: 11px;
+  padding: 2px 3px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  color: inherit;
+  text-align: right;
+}
+.alarm-unit { opacity: 0.7; }
+.alarm-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  color: inherit;
+}
+.alarm-method {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.alarm-method input { cursor: pointer; }
 
 .checklist-item {
   display: flex;
@@ -462,18 +711,34 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   margin-top: 4px;
 }
 .checklist-add-btn {
-  flex: 1;
-  min-width: 0;
+  /* (1.8.16) 예전엔 flex:1로 남는 공간을 전부 차지해서 버튼이 너무 넓었음 — 되돌리기
+     버튼처럼 내용 길이만큼만 차지하게 바꿈(가로크기 축소 요청) */
+  flex: 0 0 auto;
   border: 1px dashed var(--line);
   background: transparent;
   color: var(--ink-soft);
   font-size: 11.5px;
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 5px;
   cursor: pointer;
   text-align: center;
+  white-space: nowrap;
 }
 .checklist-add-btn:hover { background: var(--overlay); color: var(--ink); }
+
+/* (1.8.16 신규) 항목 모두 체크/모두 체크해제 토글 — 되돌리기 버튼과 같은 스타일 */
+.checklist-toggle-all-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.checklist-toggle-all-btn:hover { background: var(--overlay); color: var(--ink); }
 
 /* 체크리스트를 통째로 취소하고 싶을 때 쓰는 되돌리기 버튼(항목별 × 와는 별개) */
 .checklist-revert-btn {
@@ -488,6 +753,61 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   white-space: nowrap;
 }
 .checklist-revert-btn:hover { background: var(--overlay); color: var(--ink); }
+
+/* ---- (0.19.1) 표: 본문 안으로 들어감 ----
+   예전에는 본문과 별개인 .table-area 에 실제 <table>을 그렸는데, 이제 표도 본문 글자
+   ("| 가 | 나 |")로 들어가고 .content-editor 안에서 표 모양으로 그려진다(위쪽 .md-trow 참고).
+   여기 남은 것은 커서가 표 안에 있을 때 뜨는 조작 버튼 묶음 세 개뿐이다.
+
+   버튼 글자는 ＋ － 뿐이고 "무엇에 적용되는지"는 자리로 알려준다(태훈님 요청 2026-08-15):
+     .table-bar-col = 표 위   (커서가 있는 칸의 가로 위치)  → 열 추가/삭제
+     .table-bar-row = 표 왼쪽 (커서가 있는 줄의 높이)       → 행 추가/삭제
+     .table-bar-tbl = 표 아래                               → 표 복사/삭제
+
+   ⚠️ 이 버튼 묶음은 카드 안(.toolbar/.bottombar)에 넣으면 안 됨 — overflow:hidden 이라
+      잘려서 안 보인다(0.18.0에서 형광펜 팔레트가 안 보였던 실제 버그와 같은 원인).
+      그래서 body 바로 밑에 position:fixed 로 띄우고 좌표를 계산해서 놓는다. */
+.table-bar {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.15);
+}
+.table-bar[hidden] { display: none; }
+/* 열 묶음은 가로로(표 위에 얹히므로), 행 묶음은 세로로(표 옆에 서므로) */
+.table-bar-col { flex-direction: row; }
+.table-bar-row { flex-direction: column; }
+.table-bar-tbl { flex-direction: row; }
+.table-bar-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* ＋ － 버튼은 정사각형에 가깝게 — 글자가 아니라 기호라서 폭을 맞춰야 나란히 보임 */
+.table-bar-col .table-bar-btn,
+.table-bar-row .table-bar-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.table-bar-btn:hover { background: var(--overlay); color: var(--ink); }
+.table-bar-btn.danger:hover { background: var(--overlay-hover); color: #B33A2E; }
+.table-bar-btn.copied { background: var(--accent); color: #fff; }
 
 .attachment-strip {
   display: flex;
@@ -588,16 +908,23 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 .card:not(:focus-within) .topic-chip:not(.has-title) {
   display: none;
 }
-/* 체크리스트는 버튼류가 아니라 콘텐츠(할일 목록)라서, 편집 중이 아니어도 항상 보여야
-   한 눈에 완료 여부를 확인할 수 있음. 삭제(×)/추가 버튼 같은 조작용 요소만 편집 중일 때 나타남 */
+/* 체크리스트/표는 버튼류가 아니라 콘텐츠(할일 목록/표)라서, 편집 중이 아니어도 항상 보여야
+   한 눈에 내용을 확인할 수 있음. 삭제(×)/추가 버튼 같은 조작용 요소만 편집 중일 때 나타남 */
+/* (수정) display:none을 쓰면 버튼이 사라질 때 그 자리(높이/너비)까지 같이 없어져서, 포커스가
+   생기거나 없어질 때마다 본문 문단이 위아래로 밀리는 문제가 있었음(태훈님 피드백). visibility:
+   hidden은 안 보이게만 하고 자리(레이아웃 공간)는 그대로 남겨두므로 문단이 밀리지 않음 */
 .card:not(:focus-within) .checklist-item-del,
-.card:not(:focus-within) .checklist-actions {
-  display: none;
+.card:not(:focus-within) .checklist-actions,
+.card:not(:focus-within) .checklist-item-del2 {
+  visibility: hidden;
 }
 .card:not(:focus-within) .titlebar { border-bottom-color: transparent; }
 .card:not(:focus-within) textarea { overflow: hidden; }
 .card:not(:focus-within) textarea::placeholder { color: transparent; }
 .card:focus-within textarea { overflow-y: auto; }
+.card:not(:focus-within) .content-editor { overflow: hidden; }
+.card:not(:focus-within) .content-editor.is-empty::before { color: transparent; }
+.card:focus-within .content-editor { overflow-y: auto; }
 
 /* ---- 파일명 입력 모달 (Electron은 window.prompt를 지원하지 않아 직접 구현) ---- */
 .modal-overlay {
@@ -643,6 +970,33 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+}
+
+/* ---- 표 삽입: 격자를 가리켜서(드래그하듯) 행x열 크기를 정하는 팝업 ----
+   칸 위에 마우스를 올리면 그 칸까지(왼쪽위부터) 색이 채워지고, 그 상태에서 손을 떼면
+   (mouseup) 그 크기의 마크다운 표 문법이 커서 위치에 글자로 삽입됨 */
+.table-picker-box { width: 268px; }
+.table-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 20px);
+  grid-template-rows: repeat(8, 20px);
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.table-grid-cell {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #fff;
+  cursor: pointer;
+}
+.table-grid-cell.picked { background: var(--accent); border-color: var(--accent); }
+.table-grid-size {
+  font-size: 11px;
+  color: var(--ink-soft);
+  text-align: center;
+  margin: 0 0 10px;
 }
 
 /* ---- 메모 연결(다른 메모로 [[링크]] 걸기) 모달 ---- */
@@ -700,17 +1054,94 @@ textarea::-webkit-scrollbar-corner { background: transparent; }
 .modal-btn-cancel:hover { background: var(--overlay-hover); }
 .modal-btn-confirm { background: var(--ink); color: var(--paper); }
 .modal-btn-confirm:hover { opacity: 0.85; }
+.modal-btn-secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); margin-right: auto; }
+.modal-btn-secondary:hover { background: var(--overlay); }
+.table-modal-paste-hint { font-size: 11px; margin-top: 6px; }
 
-.export-btn {
+/* ---- 첨부 이미지 그림그리기(선/화살표/번호) ---- */
+.image-annotate-box {
+  width: 94vw;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.image-annotate-toolbar {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.annotate-tool-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.annotate-tool-btn:hover { background: var(--overlay); color: var(--ink); }
+.annotate-tool-btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.annotate-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 2px;
+}
+.annotate-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.annotate-color-swatch.active { border-color: var(--ink); }
+.annotate-toolbar-spacer { flex: 1; }
+.annotate-undo-btn {
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.annotate-undo-btn:hover { background: var(--overlay); color: var(--ink); }
+.image-annotate-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.image-annotate-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  cursor: crosshair;
+  background: #fff;
+}
+
+.export-btn {
+  /* 옆에 나란히 있는 아이콘 버튼들(.footer-icon-btn, 28x28)과 크기를 맞춤 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: none;
   background: var(--ink);
   color: #fff;
-  font-size: 12px;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-size: 9px;
+  border-radius: 5px;
   cursor: pointer;
   flex-shrink: 0;
   white-space: nowrap;

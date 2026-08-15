@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>달력</title>
+  <link rel="stylesheet" href="calendar.css" />
+</head>
+<body>
+  <div id="cal-root" class="cal-root">
+    <!-- 상단 바: 드래그 이동 + 이전/다음/오늘 + 닫기 -->
+    <div id="cal-titlebar" class="cal-titlebar">
+      <div class="cal-nav">
+        <button id="cal-prev" class="cal-navbtn" title="이전 달">‹</button>
+        <button id="cal-today" class="cal-todaybtn" title="오늘로">오늘</button>
+        <button id="cal-next" class="cal-navbtn" title="다음 달">›</button>
+      </div>
+      <div id="cal-title" class="cal-title">2026년 7월</div>
+      <div class="cal-viewswitch">
+        <button id="cal-view-month" class="cal-viewbtn active" title="월간 보기">월</button>
+        <button id="cal-view-week" class="cal-viewbtn" title="주간 보기">주</button>
+        <button id="cal-view-day" class="cal-viewbtn" title="일간 보기">일</button>
+      </div>
+      <button id="cal-mode" class="cal-modebtn" title="가계부 모드로 전환">₩</button>
+      <button id="cal-settings" class="cal-modebtn" title="달력 설정">⚙</button>
+      <button id="cal-stats" class="cal-modebtn cal-statsbtn" title="가계부 통계">📊</button>
+      <span id="cal-lock" class="cal-lock" title="잠김 — 더블클릭하면 사용할 수 있어요">🔒</span>
+      <button id="cal-close" class="cal-closebtn" title="닫기">✕</button>
+    </div>
+
+    <!-- 요일 헤더 -->
+    <div id="cal-weekdays" class="cal-weekdays"></div>
+
+    <!-- 날짜 그리드 -->
+    <div id="cal-grid" class="cal-grid"></div>
+
+    <!-- 가계부 모드 하단: 월 총합계 + 분류별 색 막대 (달력 모드에서는 숨김) -->
+    <div id="cal-ledgerfoot" class="cal-ledgerfoot" style="display:none"></div>
+  </div>
+
+  <script src="../common/appFont.js"></script>
+  <script src="calendar.js"></script>
+</body>
+</html>
