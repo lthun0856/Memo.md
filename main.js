@@ -992,6 +992,37 @@ function normalizeScheduleTime(raw) {
   return `${p(h)}:${p(m)}`;
 }
 
+/* ---------- 윈도우 시작 시 자동 실행 ----------
+   (0.20.2, 태훈님 확인 2026-08-15)
+
+   [왜 이렇게 됐나]
+   예전에는 setLoginItemSettings 를 그냥 불렀는데, `npm start` 로 테스트 실행 중에
+   자동 실행을 켜면 윈도우에 등록되는 게 우리 앱이 아니라
+   node_modules\electron\dist\electron.exe 였다. 그 등록에는 "어느 앱을 띄울지"가
+   안 들어가서, 부팅하면 electron.exe만 덩그러니 켜지고 Electron 기본 안내 화면이 떴다.
+   앱을 지워도 이 등록은 남아서 겪는 사람이 원인을 알기 어려웠음.
+
+   [그래서]
+   설치본(app.isPackaged)일 때만 등록한다. 테스트 실행 중에는 등록하지 않고,
+   예전에 잘못 등록된 게 있으면 지운다(그래서 openAtLogin: false 를 굳이 부름).
+   설정값 자체는 그대로 저장되므로, 설치해서 쓰면 그때부터 정상 동작한다.
+
+   [건드리지 말 것]
+   테스트 실행 쪽에서 path/args 를 직접 지정해 등록하는 방법도 있지만, 그러면 프로젝트
+   폴더를 옮기거나 지웠을 때 또 깨진 등록이 남는다. 등록을 아예 안 하는 게 안전하다. */
+function applyAutoLaunch(enabled) {
+  if (!app.isPackaged) {
+    // 테스트 실행 중 — 등록하지 않고, 예전에 잘못 남은 등록이 있으면 지움
+    try { app.setLoginItemSettings({ openAtLogin: false }); } catch (e) { /* 실패해도 앱은 계속 */ }
+    return;
+  }
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled, path: process.execPath, args: [] });
+  } catch (e) {
+    console.error('자동 실행 등록 실패:', e.message);
+  }
+}
+
 // ---------- 전역 단축키 ----------
 // 설정에 저장된 accelerator 문자열로 "새 메모 만들기"를 전역 등록. 설정이 바뀔 때마다
 // (settings:save) 다시 불러서 항상 최신 값으로 갱신함. 빈 문자열이면 등록하지 않음(단축키 끔)
@@ -1361,7 +1392,7 @@ app.whenReady().then(() => {
   tray.on('double-click', () => createNewMemo(null));
 
   const settings = store.getSettings();
-  app.setLoginItemSettings({ openAtLogin: !!settings.autoLaunch });
+  applyAutoLaunch(settings.autoLaunch);
 
   // 지난번 종료 시점의 전체숨김/주제숨김 상태를 창 만들기 "전에" 복원 —
   // 그래야 아래 reopenPreviouslyOpenMemos가 메모창을 만들 때부터 올바르게 숨긴 채로 만듦
@@ -1430,6 +1461,8 @@ ipcMain.handle('settings:get', () => store.getSettings());
 // (1.8.16 신규) 설정화면에 지금 실행 중인 버전을 작게 보여주기 위함 — package.json의
 // version 값을 Electron이 자동으로 읽어서 돌려줌(따로 관리 안 해도 항상 정확함)
 ipcMain.handle('app:getVersion', () => app.getVersion());
+// 설치본인지 테스트 실행인지 — 설정 화면이 자동 실행 안내를 띄울지 판단하는 데 씀(0.20.2)
+ipcMain.handle('app:isPackaged', () => app.isPackaged);
 
 // 위젯이 화면 밖으로 넘어갈 만큼 커지지 않도록, 위젯 자동크기 계산에 쓸 화면 크기를 알려줌
 // (수정) 예전엔 항상 1번 모니터(주 모니터) 크기로 알려줘서, 위젯을 다른(특히 더 작은) 모니터에
@@ -1459,7 +1492,7 @@ ipcMain.handle('settings:save', (event, incoming) => {
     calendar: { ...current.calendar, ...incoming.calendar }
   };
   const saved = store.saveSettings(merged);
-  app.setLoginItemSettings({ openAtLogin: !!saved.autoLaunch });
+  applyAutoLaunch(saved.autoLaunch);
   registerGlobalShortcuts();
   if (widgetWindow && saved.widget.autoResize === false && !saved.widget.collapsed) {
     widgetWindow.setSize(saved.widget.width, saved.widget.height);

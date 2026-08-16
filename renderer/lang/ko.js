@@ -208,6 +208,9 @@ const LANG = {
     general: {
       heading: '일반',
       autoLaunchLabel: '윈도우 시작 시 자동 실행',
+      // 테스트 실행(npm start) 중에만 보이는 안내. 그때는 우리 앱이 아니라 electron.exe가
+      // 등록돼서 부팅 때 엉뚱한 화면이 떴었음(0.20.2에서 아예 등록을 막음)
+      autoLaunchDevHint: '지금은 테스트 실행 중이라 자동 실행이 걸리지 않아요. 설치해서 쓰실 때부터 켜져요(설정은 그대로 저장돼요).',
       multiModeLabel: '메모 여러 개 동시에 띄우기 (끄면 1개만)',
       confirmMemoDeleteLabel: '메모 삭제할 때 확인창 표시',
       shortcutHeading: '단축키',

@@ -16,3 +16,6 @@ desktop.ini
 # 에디터/로그 관련 잡파일
 *.log
 .vscode/
+
+# Claude가 폴더 연결을 확인하려고 만든 시험용 파일 (지워도 됨)
+_mount_live_test.txt

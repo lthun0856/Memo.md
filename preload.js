@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('api', {
   chooseBackupFolder: () => ipcRenderer.invoke('settings:chooseBackupFolder'),
   getScreenWorkArea: () => ipcRenderer.invoke('screen:getWorkArea'),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  // 설치본인지 테스트 실행(npm start)인지 — 설정 화면의 자동 실행 안내에 씀 (0.20.2)
+  isPackaged: () => ipcRenderer.invoke('app:isPackaged'),
 
   // 주제
   getTopics: () => ipcRenderer.invoke('topics:getAll'),

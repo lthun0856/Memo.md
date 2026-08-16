@@ -88,6 +88,7 @@ const els = {
   btnCancel: document.getElementById('btnCancel'),
   saveStatus: document.getElementById('saveStatus'),
   appVersionLabel: document.getElementById('appVersionLabel'),
+  autoLaunchDevHint: document.getElementById('autoLaunchDevHint'),
   tabBtns: document.querySelectorAll('.tab-btn'),
   tabPanels: document.querySelectorAll('.tab-panel'),
   confirmModal: document.getElementById('confirmModal'),
@@ -280,12 +281,15 @@ function fillGestureOptions(selectEl, current) {
 
 async function loadAll() {
   let appVersion;
-  [settings, topics, categories, trash, appVersion] = await Promise.all([
+  let packaged;
+  [settings, topics, categories, trash, appVersion, packaged] = await Promise.all([
     window.api.getSettings(),
     window.api.getTopics(),
     window.api.getCategories(),
     window.api.getTrash(),
-    window.api.getAppVersion()
+    window.api.getAppVersion(),
+    // 옛 preload에는 없을 수 있으니 없으면 "설치본"으로 침(안내를 괜히 띄우지 않게)
+    window.api.isPackaged ? window.api.isPackaged() : Promise.resolve(true)
   ]);
   fillForm();
   renderCategories();
@@ -294,6 +298,15 @@ async function loadAll() {
   // (1.8.16 신규) "빌드해서 설치한 버전"과 "지금 손보고 있는 소스"가 헷갈리지 않도록,
   // 설정창 아래에 지금 실행 중인 버전을 작게 표시(예전엔 확인할 방법이 아예 없었음)
   if (appVersion) els.appVersionLabel.textContent = `v${appVersion}`;
+  /* (0.20.2) 테스트 실행(npm start) 중에는 자동 실행이 안 걸린다는 걸 알려줌.
+     예전에는 여기서 켜면 우리 앱이 아니라 electron.exe가 윈도우에 등록돼서,
+     부팅할 때마다 Electron 기본 안내 화면이 떴다. 지금은 아예 등록을 안 하므로
+     "안 걸린다"는 사실만 알려주면 된다(설정값 자체는 저장됨).
+     "설치본이 아님"이 확실할 때만 띄운다 — 값이 안 오면 안 띄움 */
+  if (els.autoLaunchDevHint) {
+    els.autoLaunchDevHint.textContent = LANG.settings.general.autoLaunchDevHint;
+    els.autoLaunchDevHint.hidden = packaged !== false;
+  }
 }
 
 function fillForm() {
