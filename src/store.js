@@ -128,6 +128,11 @@ const DEFAULT_SETTINGS = {
   hasSeenImageResizeNotice: false, // 이미지 자동 리사이즈 안내를 이미 봤는지 (첫 이미지 삽입 때 한 번만 안내)
   seedDataCreated: false, // 최초 실행시 예시 주제/메모를 이미 만들어놨는지 (한번 만들면 다시 안 만듦)
   opacity: 100, // 위젯+모든 메모창 공통 투명도 (100 = 불투명)
+  // (0.20.3) 숨긴 메모창을 몇 분 뒤에 실제로 닫아 메모리를 돌려줄지. 숨김(hide)은 창을 살려두는
+  // 거라 46개 메모를 한 번씩 열면 프로세스 30개/450MB가 쌓였음 — 이 시간이 지나면 창을 닫고,
+  // 다시 보일 때 저장된 내용으로 새로 만듦(내용·이미지·위치 전부 파일에 있어서 그대로 복원됨).
+  // 0이면 예전처럼 절대 안 닫음. settings.json에서 직접 고칠 수 있음
+  hiddenMemoCloseMinutes: 5,
   // 앱 전체 글씨체(윈도우에 설치된 글씨체 이름). 비어있으면 지금까지와 동일한 기본 글씨체 사용.
   // 각 창의 css가 var(--app-font, 기본값) 을 쓰고, renderer/common/appFont.js가 이 값을 넣어줌
   fontFamily: '',

@@ -192,7 +192,13 @@ function createMemoWindow(memo, options = {}) {
     if (moveTopicWindow && moveTopicTargetMemoId === memo.id) moveTopicWindow.close();
     // 메모창이 닫히면 위젯의 "열림/숨김" 표시 아이콘이 최신 상태를 반영하도록 새로고침 신호를 보냄
     broadcastMemosUpdated();
+    clearHiddenCloseTimer(memo.id);
   });
+
+  // (0.20.3) 숨겨진 채로 오래 두면 실제로 닫아서 메모리를 돌려줌 — scheduleHiddenClose 참고.
+  // 'hide'는 win.hide()를 부를 때마다, 'show'는 다시 보일 때마다 발생
+  win.on('hide', () => scheduleHiddenClose(memo.id));
+  win.on('show', () => clearHiddenCloseTimer(memo.id));
 
   // forceVisible: 주제가 숨김 상태여도 이번에 새로 만든 메모만은 숨기지 않고 바로 보여줌
   // (전체숨김 중의 새 메모는 createNewMemo가 materializeHiddenState로 전체숨김을 주제별
@@ -211,6 +217,59 @@ function showWindowAndNotify(win) {
     broadcastMemosUpdated();
   });
   win.showInactive();
+}
+
+// ---------- (0.20.3) 숨긴 메모창 자동 닫기 ----------
+// 배경: 메모를 "숨기기"하면 win.hide()로 화면에서만 사라지고 창(렌더러 프로세스 11~14MB)은
+// 그대로 살아있음. 46개 메모를 한 번씩 열었더니 보이는 창은 2개인데 프로세스 30개·450MB가
+// 잡혀 있었음. 숨긴 지 hiddenMemoCloseMinutes(기본 5분)가 지나면 창을 진짜로 닫고,
+// 다시 보여야 할 때 ensureVisibleMemoWindows/각 열기 경로에서 새로 만듦.
+// 닫아도 memo.windowOpen은 true로 남기므로(closed 핸들러가 false로 안 바꿈) 재시작 때도,
+// "다 보이기"를 눌러도 원래대로 다시 뜸. 내용·이미지·위치는 전부 파일에 있어서 그대로 복원됨.
+// ⚠️ 즉시 닫지 않고 시간을 두는 이유: 숨겼다 바로 다시 보일 때 새로 그려지는 게 눈에 띄어서
+//    예전에 "닫기→숨기기"로 바꾼 적이 있음(memos:toggleTopicOpen 주석 참고). 자주 쓰는 건 빠르게.
+const hiddenCloseTimers = new Map(); // memoId -> setTimeout 핸들
+
+function hiddenCloseDelayMs() {
+  const v = store.getSettings().hiddenMemoCloseMinutes;
+  const minutes = typeof v === 'number' && v >= 0 ? v : 5;
+  return minutes * 60 * 1000;
+}
+
+function clearHiddenCloseTimer(memoId) {
+  const t = hiddenCloseTimers.get(memoId);
+  if (t) clearTimeout(t);
+  hiddenCloseTimers.delete(memoId);
+}
+
+function scheduleHiddenClose(memoId) {
+  clearHiddenCloseTimer(memoId);
+  const delay = hiddenCloseDelayMs();
+  if (delay <= 0) return; // 0분 = 예전처럼 절대 안 닫음
+  const t = setTimeout(() => {
+    hiddenCloseTimers.delete(memoId);
+    const win = memoWindows.get(memoId);
+    if (!win || win.isDestroyed()) return;
+    // 그 사이 다시 보였거나, 최소화(Win+D 등)된 것뿐이면 닫지 않음
+    if (win.isVisible() || win.isMinimized()) return;
+    // 앱의 숨김 상태값과도 맞을 때만 닫음 (다른 이유로 안 보이는 창을 잘못 닫지 않게)
+    const memo = store.getMemos().find((m) => m.id === memoId);
+    const shouldHide = allMemosHidden || (memo && hiddenTopicIds.has(memo.topicId));
+    if (!shouldHide) return;
+    win.close(); // 'closed'에서 memoWindows에서 빠짐. windowOpen은 true로 유지
+  }, delay);
+  hiddenCloseTimers.set(memoId, t);
+}
+
+// "보여야 하는데 창이 없는" 메모(자동 닫힘된 메모 / 숨김 상태로 시작해서 아예 안 만든 메모)의
+// 창을 새로 만듦. 보임/숨김 상태가 바뀌는 경로(전체숨김 순환, 주제 이동 등)에서 호출
+function ensureVisibleMemoWindows() {
+  if (allMemosHidden) return;
+  store.getMemos().forEach((m) => {
+    if (!m.windowOpen || memoWindows.has(m.id)) return;
+    if (hiddenTopicIds.has(m.topicId)) return;
+    createMemoWindow(m);
+  });
 }
 
 // initialPos를 넘기면(예: 최초 설치 직후 웰컴창 옆에 붙이는 용도) 저장된 위치/기본 귀퉁이 위치
@@ -756,12 +815,15 @@ function loadVisibilityState() {
 // 전체숨김을 풀어도 나머지 메모들의 숨김이 그대로 유지되게 함
 function materializeHiddenState() {
   if (!allMemosHidden) return;
-  const memos = store.getMemos();
-  memoWindows.forEach((win, memoId) => {
-    if (!win.isVisible()) {
-      const memo = memos.find((m) => m.id === memoId);
-      if (memo && memo.topicId) hiddenTopicIds.add(memo.topicId);
-    }
+  // (0.20.3) 창이 있는 메모만 보면 안 됨 — 전체숨김 중에 자동으로 닫힌 메모(창 없음, windowOpen true)도
+  // 숨겨진 메모이므로 그 주제를 같이 옮겨 적어야 함. 안 그러면 전체숨김을 푸는 순간 그 메모들이
+  // "보임" 상태로 간주돼 다음 실행 때 다시 튀어나옴
+  store.getMemos().forEach((memo) => {
+    if (!memo.topicId) return;
+    const win = memoWindows.get(memo.id);
+    const hiddenWithWindow = win && !win.isDestroyed() && !win.isVisible();
+    const closedButOpen = !win && memo.windowOpen;
+    if (hiddenWithWindow || closedButOpen) hiddenTopicIds.add(memo.topicId);
   });
   allMemosHidden = false;
 }
@@ -787,6 +849,8 @@ function applyVisibilityToWindows() {
       showWindowAndNotify(win);
     }
   });
+  // (0.20.3) 숨겨져 있다가 자동으로 닫힌 메모는 창이 없으므로 위 반복문에 안 걸림 — 여기서 새로 만듦
+  ensureVisibleMemoWindows();
 }
 
 // 위젯의 전체숨김 버튼이 "지금 상태 + 다음에 누르면 뭐가 되는지"를 표시할 수 있게 알려줌
@@ -800,7 +864,11 @@ function getVisibilityState() {
 // 나머지는 120ms 간격으로 순차 생성해서 시작 체감 속도를 개선함
 function reopenPreviouslyOpenMemos() {
   const memos = store.getMemos();
-  const toOpen = memos.filter((m) => m.windowOpen && !memoWindows.has(m.id));
+  // (0.20.3) 어차피 숨겨질 메모(전체숨김/주제숨김)는 창을 만들지 않음 — 예전엔 만들어서 바로 hide()
+  // 했기 때문에 부팅 직후부터 안 보이는 창 수십 개가 메모리를 차지했음. 다시 보여야 할 때
+  // ensureVisibleMemoWindows/각 열기 경로가 만듦(windowOpen은 true로 남아 있으니 잊히지 않음)
+  const toOpen = memos.filter((m) => m.windowOpen && !memoWindows.has(m.id)
+    && !allMemosHidden && !hiddenTopicIds.has(m.topicId));
   toOpen.forEach((m, i) => {
     if (i === 0) {
       createMemoWindow(m);
@@ -1668,6 +1736,9 @@ ipcMain.handle('memos:setTopic', (event, { memoId, topicId }) => {
     } else if (!win.isVisible()) {
       showWindowAndNotify(win);
     }
+  } else if (!win && !allMemosHidden && memos[idx].windowOpen && !(topic && hiddenTopicIds.has(topic.id))) {
+    // (0.20.3) 숨긴 주제에서 자동으로 닫힌 메모를 보이는 주제로 옮기면 창을 새로 만들어 보여줌
+    createMemoWindow(memos[idx]);
   }
 
   broadcastMemosUpdated();
@@ -3357,6 +3428,7 @@ ipcMain.handle('memos:toggleVisibility', () => {
     memoWindows.forEach((win) => {
       if (!win.isVisible()) showWindowAndNotify(win);
     });
+    ensureVisibleMemoWindows(); // (0.20.3) 숨김 중 자동으로 닫힌 메모도 다시 만들어 보여줌
   } else {
     // ②·④ 스냅샷(누르기 직전 상태)으로 복원
     allMemosHidden = false;
