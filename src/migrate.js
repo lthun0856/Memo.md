@@ -125,7 +125,82 @@ function buildContentWithImages(memo) {
   return body.trim() ? `${block}\n\n${body}` : block;
 }
 
+/* ---- 0.21.0: "달력" 주제 메모 → 일정(events.json) 복사 -------------------
+   [태훈님 확정 2026-09-22]
+   - 이사가 아니라 "복사". 원본 메모는 한 글자도 안 지우고 copiedToEventId 표식만 붙임
+     (main.js가 붙임). 이전 버전으로 되돌려도 옛 앱은 모르는 필드를 무시하므로 그대로 동작.
+   - 대상은 "달력" 주제(calendarTopic: true) 메모 중 일정 날짜(scheduleAt 16글자)가 있는 것만.
+     다른 주제 메모에 붙은 날짜는 메모 날짜로 그대로 둠.
+   - 중복 방지 이중 체크: ① 원본에 copiedToEventId가 이미 있으면 건너뜀
+                        ② 이미 있는 일정 중 sourceMemoId가 같은 게 있으면 건너뜀
+   여기는 "무엇을 만들지"만 계산함. 파일 저장·스냅샷은 main.js 담당(따로 검증하려고 나눔).
+   -------------------------------------------------------------------------- */
+
+const SCHEDULE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+// 메모 본문에서 일정 "메모 한 줄"로 쓸 첫 줄을 뽑음(이미지·표 줄은 건너뜀). 없으면 ''
+function firstNoteLine(content) {
+  const lines = String(content || '').split(/\r?\n/);
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) continue;
+    if (/^!\[\[/.test(t) || /^\|/.test(t)) continue;
+    return t.replace(/^[-*]\s+\[[ xX]\]\s*/, '').replace(/^#+\s*/, '').slice(0, 200);
+  }
+  return '';
+}
+
+function copyAlarm(a) {
+  const src = a && typeof a === 'object' ? a : {};
+  const b = src.before && typeof src.before === 'object' ? src.before : {};
+  return {
+    enabled: !!src.enabled,
+    before: { days: +b.days || 0, hours: +b.hours || 0, minutes: +b.minutes || 0 },
+    repeat: typeof src.repeat === 'string' ? src.repeat : 'none',
+    methods: Array.isArray(src.methods) ? src.methods.slice() : ['notify', 'sound'],
+    // 이미 울린 기록도 그대로 가져와야 옮긴 직후 지난 알람이 또 울리지 않음
+    firedFor: src.firedFor || null
+  };
+}
+
+// memos, topics, existingEvents(배열) → { events: 새로 만들 일정들, links: [{memoId, eventId}] }
+// makeId: 새 id를 만드는 함수(테스트에서 바꿔 끼울 수 있게 밖에서 받음)
+function planEventMigration(memos, topics, existingEvents, makeId, nowIso) {
+  const calTopicIds = new Set(
+    (Array.isArray(topics) ? topics : []).filter((t) => t && t.calendarTopic).map((t) => t.id)
+  );
+  const alreadyCopied = new Set(
+    (Array.isArray(existingEvents) ? existingEvents : []).map((e) => e && e.sourceMemoId).filter(Boolean)
+  );
+  const events = [];
+  const links = [];
+  (Array.isArray(memos) ? memos : []).forEach((m) => {
+    if (!m || !m.id || !calTopicIds.has(m.topicId)) return;
+    if (typeof m.scheduleAt !== 'string' || !SCHEDULE_RE.test(m.scheduleAt)) return;
+    if (m.copiedToEventId) return;           // ① 이미 복사됨
+    if (alreadyCopied.has(m.id)) return;     // ② 일정 쪽에 이미 있음
+    const id = makeId();
+    events.push({
+      id,
+      title: String(m.title || '').trim(),
+      note: firstNoteLine(m.content),
+      start: m.scheduleAt,
+      alarm: copyAlarm(m.alarm),
+      sourceMemoId: m.id,
+      google: null,
+      createdAt: m.createdAt || nowIso,
+      updatedAt: nowIso,
+      deletedAt: null
+    });
+    links.push({ memoId: m.id, eventId: id });
+    alreadyCopied.add(m.id);
+  });
+  return { events, links };
+}
+
 module.exports = {
+  planEventMigration,
+  firstNoteLine,
   needsChecklistMigration,
   buildContentWithChecklist,
   needsTableMigration,

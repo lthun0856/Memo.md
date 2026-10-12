@@ -19,3 +19,11 @@ desktop.ini
 
 # Claude가 폴더 연결을 확인하려고 만든 시험용 파일 (지워도 됨)
 _mount_live_test.txt
+
+# 테스트 모드 데이터 + 구글 OAuth 연결 파일(client_secret_*.json) - 절대 올리지 않음 (0.22.0)
+test-data/
+client_secret_*.json
+
+# 수정 전 임시 백업 파일 / 디자인 시안(내부용)
+*.bak_*
+디자인시안/

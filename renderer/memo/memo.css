@@ -489,6 +489,9 @@ textarea::-webkit-scrollbar-corner,
   display: block;
   max-width: 100%;
   height: auto;            /* 폭만 저장하고 높이는 원본 비율 자동 — 찌그러질 수가 없음 */
+  /* (0.23.0) 화면 높이에 맞춰 자동으로 줄이는 방식(max-height)을 잠깐 썼다가 되돌림 — 그림만 줄고 감싸는 칸은
+     그대로라 크기 손잡이가 그림에서 떨어져 보였고, 메모를 키우면 그림도 커지는 게 어색했음(태훈님 2026-10-09).
+     지금은 "넣을 때만" 메모 안에 들어오게 폭을 정해서 저장함(memo.js fitNewImage) */
   border-radius: 6px;
   outline: 1px solid var(--line);
   outline-offset: -1px;
@@ -1128,6 +1131,7 @@ textarea::-webkit-scrollbar-corner,
   cursor: crosshair;
   background: #fff;
 }
+.image-annotate-canvas.erasing { cursor: cell; }
 
 .export-btn {
   /* 옆에 나란히 있는 아이콘 버튼들(.footer-icon-btn, 28x28)과 크기를 맞춤 */

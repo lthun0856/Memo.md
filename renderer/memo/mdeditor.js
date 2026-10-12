@@ -1516,6 +1516,21 @@
     // 그림을 눌렀을 때 할 일(그림그리기 창 열기)을 memo.js가 넘겨줌
     api.setImageClick = function (fn) { imageClick = fn; };
     // 커서 자리에 그림 한 줄을 넣음. 그림 줄 위에 있으면 그 아래에 넣음
+    // (0.23.0) 방금 넣은 그림 줄("![[이름]]", 폭 없음)에 폭을 붙여 "![[이름|폭]]"으로 바꿈.
+    // 그림 원래 크기는 파일을 읽어야 알 수 있어서, 넣는 건 바로 하고 폭은 조금 뒤에 이걸로 붙임(memo.js fitNewImage)
+    api.setImageWidth = function (name, width) {
+      var w = Math.round(width);
+      if (!(w > 0)) return false;
+      var info = scanLines(getValue());
+      for (var i = info.length - 1; i >= 0; i--) {
+        var im = parseImageLine(info[i].text);
+        if (!im || im.name !== name || im.width > 0) continue;
+        replaceRange(info[i].s, info[i].e, im.lead + '![[' + im.name + '|' + w + ']]' + im.trail);
+        return true;
+      }
+      return false;
+    };
+
     api.insertImage = function (name, width) {
       var s = getSel();
       var info = scanLines(getValue());

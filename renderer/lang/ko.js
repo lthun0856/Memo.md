@@ -133,14 +133,32 @@ const LANG = {
   // 설정창(renderer/settings) — 탭이 여러 개인 큰 창. 탭별로 묶어서 정리함
   settings: {
     windowTitle: '설정',
+    // (0.23.0) 왼쪽 세로 메뉴 이름. groupMemo/groupManage는 메뉴 사이의 작은 묶음 제목
     tabs: {
-      topics: '주제관리',
       general: '일반',
+      look: '모양',
       widget: '위젯',
+      groupMemo: '메모',
+      topics: '주제',
+      edit: '편집',
       md: 'MD설정',
-      edit: '편집바 특수문자',
+      groupManage: '관리',
+      backup: '저장·백업',
+      shortcut: '단축키',
       trash: '휴지통',
-      help: '도움말'
+      help: '도움말',
+      google: '구글 캘린더'
+    },
+    // (0.23.0) 설정창 개편으로 새로 생긴 카드 제목·줄 이름
+    layout: {
+      topicListHeading: '주제 목록',
+      topicNewHeading: '새 주제 만들기',
+      exportGroupHeading: '내보내기',
+      exportAllRowLabel: '전체 메모 내보내기',
+      exportAllShortButton: '내보내기',
+      restoreRowLabel: '백업에서 복구',
+      restoreShortButton: '복구하기',
+      shortcutRowLabel: '새 메모 만들기'
     },
     common: {
       delete: '삭제',
@@ -267,7 +285,32 @@ const LANG = {
       intervalDaily: '매일',
       interval12h: '12시간마다',
       interval6h: '6시간마다',
-      intervalEveryLaunch: '프로그램 켤 때마다'
+      intervalEveryLaunch: '프로그램 켤 때마다',
+      // 구글 캘린더 동기화(0.22.0)
+      googleHeading: '구글 캘린더',
+      googleHint: '달력 일정을 구글 캘린더(기본 달력)와 서로 맞춰요. 메모에 붙은 날짜는 구글로 안 보내요. 여기 버튼들은 "저장"을 안 눌러도 바로 적용돼요.',
+      googleHint2: '처음 한 번: ① "연결 파일 선택"으로 구글에서 받은 client_secret_….json 파일을 고르고 ② "연결"을 눌러 브라우저에서 로그인하세요. "확인되지 않은 앱" 화면이 나오면 "고급 → MEMO.md(으)로 이동"을 누르면 돼요. 알람은 앱에만 있고 구글로 안 보내요.',
+      googleClientButton: '연결 파일 선택',
+      googleConnectButton: '연결',
+      googleReconnectButton: '다시 연결',
+      googleSyncButton: '지금 동기화',
+      googleDisconnectButton: '연결 해제',
+      googleIntervalLabel: '자동 동기화',
+      googleIntervalUnit: '분마다',
+      googleStateNoClient: '⚪ 연결 파일이 없어요',
+      googleStateReady: '⚪ 연결 안 됨 (연결 파일 준비됨)',
+      googleStateConnected: '🟢 연결됨: {account}',
+      googleStateNeedsReconnect: '🔴 연결이 풀렸어요 — "다시 연결"을 눌러 주세요',
+      googleStateConnecting: '⏳ 브라우저에서 로그인해 주세요… (5분 안에)',
+      googleStateSyncing: '🔄 동기화 중…',
+      googleLastSync: '마지막 동기화: {time}',
+      googleLastResult: ' (가져옴 {added} · 바뀜 {updated} · 휴지통 {trashed} · 보냄 {pushed})',
+      googleNeverSynced: '아직 동기화한 적 없어요',
+      googleClientOk: '연결 파일을 저장했어요',
+      googleDisconnectConfirm: '구글 캘린더 연결을 해제할까요?',
+      googleDisconnectHint: '앱 일정과 구글 일정은 둘 다 그대로 남아요(더 이상 서로 맞추지만 않아요). 구글 반복 일정은 달력에서 내려가요.',
+      googleIntervalSaved: '저장됨',
+      googleErrorPrefix: '⚠ '
     },
 
     // 위젯 탭 (설정창 안의 탭 — 위젯 자체 문구는 LANG.widget에 따로 있음)
@@ -344,19 +387,20 @@ const LANG = {
     // 휴지통 탭
     trashTab: {
       heading: '휴지통',
-      hint: '삭제한 메모가 60일간 여기 보관돼요. 그 안에는 복구할 수 있고, 60일이 지나면 자동으로 완전히 지워져요(복구 불가).',
+      hint: '삭제한 메모와 달력 일정이 60일간 여기 보관돼요. 그 안에는 복구할 수 있고, 60일이 지나면 자동으로 완전히 지워져요(복구 불가).',
       emptyButton: '휴지통 비우기',
       emptyListHint: '휴지통이 비어있습니다.',
       deletedTopicFallback: '(삭제된 주제)',
+      eventLabel: '📅 달력 일정',
       noTitle: '제목없음',
       itemTooltip: '{title} — {topic} · 삭제일 {date} · {daysLeft}일 후 완전삭제',
       itemDesc: '{topic} · {date} 삭제 · {daysLeft}일 남음',
       restoreButton: '복구',
       permanentDeleteTitle: '완전삭제',
-      permanentDeleteConfirmTitle: '"{title}" 메모를 완전히 삭제할까요?',
+      permanentDeleteConfirmTitle: '"{title}"을(를) 완전히 삭제할까요?',
       permanentDeleteConfirmHint: '복구할 수 없습니다.',
       emptyConfirmTitle: '휴지통을 비울까요?',
-      emptyConfirmHint: '메모 {count}개가 전부 복구할 수 없이 완전히 삭제됩니다.',
+      emptyConfirmHint: '{count}개가 전부 복구할 수 없이 완전히 삭제됩니다.',
       emptyConfirmButton: '비우기'
     }
   },
@@ -425,13 +469,15 @@ const LANG = {
     tableCopyButtonTitle: '엑셀/워드 등에 표 그대로 붙여넣을 수 있게 복사해요(마크다운 문법 아님)',
     tableCopyDoneButton: '복사됨',
 
+    imageAnnotateToolPen: '펜',
     imageAnnotateToolLine: '선',
     imageAnnotateToolArrow: '화살표',
     imageAnnotateToolNumber: '번호',
+    imageAnnotateToolEraser: '지우개',
     imageAnnotateColorTitle: '색상 선택',
     imageAnnotateUndoButton: '되돌리기',
     imageAnnotateSaveButton: '저장',
-    imageAnnotateHint: '선·화살표는 끌어서 긋고, 번호는 도구를 고른 뒤 이미지를 누르면 매겨져요(누를 때마다 다음 숫자). 저장을 누르면 이미지에 그대로 합쳐져요.',
+    imageAnnotateHint: '펜은 끄는 대로 자유롭게 그려지고, 선·화살표는 끌어서 긋고, 번호는 누를 때마다 다음 숫자가 매겨져요. 지우개로 문지르면 그린 획이 통째로 지워져요(원본 사진은 그대로). 되돌리기는 Ctrl+Z. 저장을 누르면 이미지에 그대로 합쳐져요.',
     imageAnnotateSaveError: '저장에 실패했어요. 잠시 후 다시 시도해주세요.',
     imageAnnotateUnsupported: '이 이미지 형식(gif·webp·svg)은 그림그리기를 지원하지 않아요.',
 

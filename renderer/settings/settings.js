@@ -115,6 +115,15 @@ function applyLang() {
   document.getElementById('tabBtnEdit').textContent = S.tabs.edit;
   document.getElementById('tabBtnTrash').textContent = S.tabs.trash;
   document.getElementById('tabBtnHelp').textContent = S.tabs.help;
+  document.getElementById('tabBtnLook').textContent = S.tabs.look;
+  document.getElementById('tabBtnBackup').textContent = S.tabs.backup;
+  document.getElementById('tabBtnShortcut').textContent = S.tabs.shortcut;
+  document.getElementById('sideGroupMemo').textContent = S.tabs.groupMemo;
+  document.getElementById('sideGroupManage').textContent = S.tabs.groupManage;
+  // 오른쪽 위 큰 제목 = 왼쪽 메뉴 이름 그대로
+  document.querySelectorAll('[data-title-for]').forEach((h) => {
+    h.textContent = S.tabs[h.dataset.titleFor] || '';
+  });
 
   els.btnCancel.textContent = S.saveBar.cancel;
   els.btnApply.textContent = S.saveBar.apply;
@@ -181,6 +190,16 @@ function applyLang() {
   document.getElementById('storageHeading').textContent = G.storageHeading;
   document.getElementById('storageHint').textContent = G.storageHint;
   els.btnSweepAttachments.textContent = G.sweepButton;
+  // (0.23.0) 카드 줄 이름(왼쪽)이 생겨서 오른쪽 버튼 글씨는 짧게
+  const L = S.layout;
+  document.getElementById('topicListHeading').textContent = L.topicListHeading;
+  document.getElementById('topicNewHeading').textContent = L.topicNewHeading;
+  document.getElementById('exportGroupHeading').textContent = L.exportGroupHeading;
+  document.getElementById('exportAllRowLabel').textContent = L.exportAllRowLabel;
+  els.btnExportAll.textContent = L.exportAllShortButton;
+  document.getElementById('restoreRowLabel').textContent = L.restoreRowLabel;
+  els.btnRestoreBackup.textContent = L.restoreShortButton;
+  document.getElementById('shortcutRowLabel').textContent = L.shortcutRowLabel;
   document.getElementById('autoBackupHeading').textContent = G.autoBackupHeading;
   document.getElementById('autoBackupHint').textContent = G.autoBackupHint;
   document.getElementById('autoBackupEnabledLabel').textContent = G.autoBackupEnabledLabel;
@@ -260,11 +279,20 @@ applyLang();
 function switchTab(tabName) {
   els.tabBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabName));
   els.tabPanels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === tabName));
+  // 메뉴를 바꾸면 오른쪽 내용은 맨 위부터 보이게
+  const sc = document.getElementById('mainScroll');
+  if (sc) sc.scrollTop = 0;
 }
 els.tabBtns.forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
-switchTab('topics');
+// (0.23.0) 처음엔 '일반'. 단, 주제가 하나도 없으면(첫 설치) loadAll에서 '주제'로 바꿔줌
+// — 주제를 먼저 만들어야 메모를 쓸 수 있어서 예전엔 항상 주제관리 탭부터 열었음
+switchTab('general');
+// (0.23.0) 도움말 메뉴의 "열기" 버튼 → 사용 설명서 창(그 페이지부터)
+document.querySelectorAll('[data-help-page]').forEach((b) => {
+  b.addEventListener('click', () => { if (window.api.openHelpWindow) window.api.openHelpWindow(b.dataset.helpPage); });
+});
 
 function fillGestureOptions(selectEl, current) {
   selectEl.innerHTML = '';
@@ -295,6 +323,7 @@ async function loadAll() {
   renderCategories();
   renderTopics();
   renderTrash();
+  if (!topics || topics.length === 0) switchTab('topics');
   // (1.8.16 신규) "빌드해서 설치한 버전"과 "지금 손보고 있는 소스"가 헷갈리지 않도록,
   // 설정창 아래에 지금 실행 중인 버전을 작게 표시(예전엔 확인할 방법이 아예 없었음)
   if (appVersion) els.appVersionLabel.textContent = `v${appVersion}`;
@@ -950,7 +979,10 @@ function renderTrash() {
   const sorted = trash.slice().sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
   sorted.forEach((item) => {
     const topic = topics.find((t) => t.id === item.topicId);
-    const topicLabel = topic ? topic.name : RT.deletedTopicFallback;
+    // (0.21.0) 지운 달력 일정도 같은 목록에 섞여 나옴(kind: 'event')
+    const topicLabel = item.kind === 'event'
+      ? (RT.eventLabel || '📅 달력 일정')
+      : (topic ? topic.name : RT.deletedTopicFallback);
 
     const el = document.createElement('div');
     el.className = 'trash-item';
@@ -1095,5 +1127,9 @@ els.btnApply.addEventListener('click', async () => {
 els.btnCancel.addEventListener('click', () => window.close());
 
 // (가계부 분류 관리는 달력창 ⚙️로 이동함 — 태훈님 요청 2026-07-24)
+
+/* ---- 구글 캘린더 ----
+   (0.23.0) 달력 설정 창(renderer/calSettings/calSettings.js)으로 통째로 옮김.
+   원본은 인계서/백업_설정개편_20261008/settings/settings.js 에 있음 */
 
 loadAll();

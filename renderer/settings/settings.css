@@ -1,9 +1,26 @@
 * { box-sizing: border-box; }
+/* (0.23.0) 설정창 개편 — 왼쪽 세로 메뉴 + 오른쪽 카드. 기준: 디자인시안/설정화면_디자인시안.html
+   색은 예전 설정창 베이지 계열 그대로. 아래 :root 값만 바꾸면 전체 색이 같이 바뀜 */
+:root {
+  --win: #F5F3EC;      /* 창 바탕 */
+  --side: #EDE9DC;     /* 왼쪽 메뉴 바탕 */
+  --dark: #29271F;     /* 선택된 메뉴·주 버튼·켜진 스위치 */
+  --card: #FBFAF6;     /* 카드 */
+  --line: #E3DDC8;     /* 카드 테두리·줄 구분선 */
+  --field: #D8D2BC;    /* 입력칸 테두리 */
+  --ink: #111111;      /* 본문 글씨 */
+  --sub: #8A8470;      /* 흐린 설명 글씨 */
+  --muted: #4A4739;    /* 카드 제목 등 */
+  --danger: #B24A3B;
+}
+html, body { height: 100%; }
 body {
   margin: 0;
   font-family: var(--app-font, -apple-system, "Malgun Gothic", "Noto Sans KR", sans-serif);
-  background: #F5F3EC;
-  color: #111111;
+  background: var(--win);
+  color: var(--ink);
+  font-size: 12.5px;
+  overflow: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(0,0,0,0.22) transparent;
 }
@@ -12,85 +29,119 @@ body {
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.34); }
 ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-.wrap { padding: 16px 18px 70px; }
 
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid #D8D2BC;
-  padding-bottom: 8px;
-  position: sticky;
-  top: 0;
-  background: #F5F3EC;
-  z-index: 5;
+/* ── 전체 틀 ── */
+.layout { display: flex; height: 100%; }
+.side {
+  width: 168px; flex: none;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+  padding: 12px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
 }
+.side-grp { font-size: 10.5px; color: var(--sub); padding: 10px 10px 4px; letter-spacing: 0.04em; }
 .tab-btn {
-  background: transparent;
-  color: #4A4739;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; text-align: left;
+  background: transparent; color: var(--ink);
+  padding: 7px 10px; border-radius: 6px;
+  font-size: 12.5px; font-weight: normal;
 }
-.tab-btn:hover { background: rgba(0,0,0,0.06); opacity: 1; }
-.tab-btn.active { background: #29271F; color: #fff; }
+.tab-btn .ic { width: 18px; flex: none; text-align: center; font-size: 13px; opacity: 0.75; }
+.tab-btn .ic-sm { font-size: 10.5px; font-weight: 700; }
+.tab-btn:hover { background: rgba(0,0,0,0.05); opacity: 1; }
+.tab-btn.active { background: var(--dark); color: #fff; }
+.tab-btn.active .ic { opacity: 1; }
+.tab-btn:focus-visible { outline: 2px solid var(--dark); outline-offset: 1px; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.scroll { flex: 1; overflow-y: auto; padding: 20px 24px 24px; }
 
 .tab-panel { display: none; }
-.tab-panel.active { display: block; }
+.tab-panel.active { display: flex; flex-direction: column; gap: 18px; }
+.panel-title { font-size: 17px; margin: 0 0 -4px; color: var(--ink); }
+.panel-hint { margin: -6px 0 0 4px; }
 
+/* 카드 묶음: 작은 제목(h2) + 둥근 카드 */
+.sec { display: flex; flex-direction: column; gap: 6px; }
 h2 {
-  font-size: 13px;
-  color: #111111;
-  margin: 18px 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 700;
+  font-size: 11.5px; color: var(--muted);
+  margin: 0 0 0 4px; font-weight: 700;
 }
-.tab-panel section:first-of-type h2 { margin-top: 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.card-pad { padding: 12px 14px; }
 
-.row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+/* 한 줄 = 왼쪽 이름(+흐린 설명) / 오른쪽 끝 조작 */
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 11px 14px; min-height: 48px; margin: 0;
+}
+.row + .row { border-top: 1px solid var(--line); }
 /* hidden 속성이 붙은 줄은 확실히 감춤 — display:flex가 hidden보다 우선이라 이 규칙이 없으면 안 숨겨짐 */
 .row[hidden] { display: none; }
-.row input[type="text"] { flex: 1; }
-.row label { font-size: 12px; color: #111111; display: flex; align-items: center; gap: 6px; }
+label.row { cursor: pointer; }
+.lab { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lab b { font-weight: normal; font-size: 13px; color: var(--ink); }
+.ctrl { flex: none; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.row-stack { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 6px; }
+.row-path input[type="text"] { flex: 1; min-width: 0; }
+.status-line:empty { display: none; }
+.btn-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.example-box { font-family: Consolas, monospace; font-size: 12px; background: #F2EFE3; border-radius: 4px; padding: 2px 6px; }
+.shortcut-input { width: 170px; text-align: center; cursor: pointer; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
 
 input[type="text"], input[type="number"], select {
-  padding: 6px 8px;
-  border: 1px solid #D8D2BC;
-  border-radius: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--field);
+  border-radius: 6px;
   font-size: 12.5px;
+  font-family: inherit;
   background: #fff;
-  color: #111111;
+  color: var(--ink);
 }
-input[type="number"] { width: 70px; }
+input[type="number"] { width: 72px; text-align: right; }
+.color-input { width: 34px; height: 26px; padding: 0; border: 1px solid var(--field); border-radius: 5px; background: #fff; cursor: pointer; }
+
+/* 켜기/끄기 스위치 — 진짜 체크박스에 모양만 입힘(기능 코드는 예전 checked 그대로 씀) */
+input[type="checkbox"].sw {
+  appearance: none; -webkit-appearance: none;
+  width: 36px; height: 20px; margin: 0; flex: none;
+  border-radius: 10px; background: #CFC8B0;
+  position: relative; cursor: pointer; transition: background .15s;
+}
+input[type="checkbox"].sw::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s;
+}
+input[type="checkbox"].sw:checked { background: var(--dark); }
+input[type="checkbox"].sw:checked::after { left: 19px; }
+input[type="checkbox"].sw:focus-visible { outline: 2px solid var(--dark); outline-offset: 2px; }
+
+/* 둘 중 하나 고르기 — 진짜 라디오 버튼에 모양만 입힘 */
+.seg { display: inline-flex; border: 1px solid var(--field); border-radius: 6px; overflow: hidden; background: #fff; gap: 0; }
+.seg label { display: flex; cursor: pointer; }
+.seg label + label { border-left: 1px solid var(--field); }
+.seg input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+.seg label > span { padding: 5px 11px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.seg input[type="radio"]:checked + span { background: var(--dark); color: #fff; }
+.seg input[type="radio"]:focus-visible + span { outline: 2px solid var(--dark); outline-offset: -2px; }
+
+/* 슬라이더 */
+.range input[type="range"] { width: 150px; accent-color: var(--dark); }
+.range-val { width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .check-row {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12.5px;
-  margin-bottom: 6px;
-  color: #111111;
+  color: var(--ink);
 }
 
-.hint { font-size: 11px; color: #4A4739; margin-top: 2px; }
-.hint-error { color: #B24A3B; }
-
-.subgroup-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  color: #8A6A2F;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0 0 8px;
-}
-.subgroup-label.with-divider {
-  border-top: 1px solid #D8D2BC;
-  padding-top: 14px;
-  margin-top: 14px;
-}
+.hint { font-size: 11px; color: var(--sub); margin: 0; line-height: 1.5; }
+.hint-error { color: var(--danger); }
 
 /* MD내보내기 후 동작: 유지=초록, 전송후삭제=빨강 동그라미로 한눈에 구분 */
 .status-dot {
@@ -105,14 +156,20 @@ input[type="number"] { width: 70px; }
 
 button {
   border: none;
-  background: #29271F;
+  background: var(--dark);
   color: #fff;
   padding: 7px 12px;
-  border-radius: 5px;
+  border-radius: 6px;
   font-size: 12px;
+  font-family: inherit;
   cursor: pointer;
 }
 button:hover { opacity: 0.85; }
+/* 카드 안 보조 버튼(폴더 선택·내보내기 등)은 흰 버튼 */
+button.btn-light { background: #fff; color: var(--ink); border: 1px solid var(--field); padding: 6px 12px; }
+button.btn-light:hover { background: #F2EFE3; opacity: 1; }
+button.btn-danger-text { color: var(--danger); }
+button[disabled] { opacity: 0.45; cursor: default; }
 
 .category-list { margin: 4px 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
 .category-item {
@@ -180,11 +237,10 @@ button:hover { opacity: 0.85; }
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px;
-  margin-top: 8px;
-  border: 1px solid #D8D2BC;
-  border-radius: 8px;
-  background: #FBFAF6;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
 }
 .topic-form-row {
   display: flex;
@@ -279,42 +335,36 @@ button:hover { opacity: 0.85; }
 /* MD 기능이 꺼졌을 때만 숨기는 항목(예: 상위 주제 드롭다운) */
 body.md-disabled .md-feature-only { display: none; }
 
-.special-char-inputs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.special-char-inputs { display: flex; flex-wrap: wrap; gap: 6px; }
 .special-char-input { width: 40px !important; text-align: center; }
 
 /* 자주 쓰는 특수문자 참고 목록: 클릭 기능 없이 그냥 보고 직접 선택→복사하는 용도 */
-.special-char-reference { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.special-char-reference { display: flex; flex-direction: column; gap: 6px; }
 .special-char-ref-group { display: flex; align-items: baseline; gap: 10px; }
 .special-char-ref-label { flex: 0 0 64px; font-size: 11px; color: #4A4739; }
 .special-char-ref-chars { font-size: 15px; letter-spacing: 3px; user-select: text; cursor: text; }
 
-.help-frame {
-  width: 100%;
-  height: 560px;
-  border: 1px solid #D8D2BC;
-  border-radius: 8px;
-  background: #F5F3EC;
-}
+/* (0.23.0) 도움말은 별도 창으로 엶 — 예전 iframe 모양(.help-frame)은 삭제 */
 
 .save-bar {
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  background: #F5F3EC;
-  border-top: 1px solid #D8D2BC;
+  flex: none;
+  background: var(--win);
+  border-top: 1px solid var(--line);
   padding: 10px 18px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
 }
-#saveStatus { font-size: 11px; color: #4A4739; }
+#saveStatus { font-size: 11px; color: var(--sub); }
 /* (1.8.16 신규) 지금 실행 중인 버전 번호를 작게 표시 — 태훈님이 설치파일을 새로 만들어
    실행한 게 맞는지 화면에서 바로 확인할 수 있게(예전엔 앱 안에 버전 표시가 아예 없었음) */
 .app-version-label { font-size: 10px; color: #A39C87; margin-right: auto; }
 .save-btn { padding: 8px 18px; }
-.cancel-btn { background: transparent; color: #4A4739; border: 1px solid #D8D2BC; }
+.cancel-btn { background: #fff; color: var(--ink); border: 1px solid var(--field); }
 .cancel-btn:hover { background: rgba(0,0,0,0.05); opacity: 1; }
-.apply-btn { background: #6B6551; }
+.apply-btn { background: #fff; color: var(--ink); border: 1px solid var(--field); }
+.apply-btn:hover { background: #F2EFE3; opacity: 1; }
 
 /* ---- 삭제/확인 모달 (네이티브 confirm()이 닫힌 뒤 창이 클릭/입력을 못 받는 문제를 피하려고 자체 구현) ---- */
 .modal-overlay {
@@ -355,3 +405,7 @@ body.md-disabled .md-feature-only { display: none; }
   line-height: 1.6;
   white-space: pre-line;
 }
+
+/* 구글 캘린더(0.22.0) */
+.google-state { font-size: 12px; font-weight: 600; color: #29271F; }
+

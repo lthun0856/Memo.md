@@ -1,7 +1,23 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, screen, clipboard, globalShortcut, nativeImage, Notification, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, screen, clipboard, globalShortcut, nativeImage, Notification, shell, safeStorage, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
+// ---- 테스트용 데이터 폴더 (0.21.0) ----
+// 환경변수 MEMO_DATA_DIR 이 있으면 앱 데이터(메모·설정·첨부 전부)를 그 폴더에서 읽고 씀.
+// 실제 데이터를 건드리지 않고 테스트하기 위한 장치 — 평소(환경변수 없음)엔 아무 변화 없음.
+// 반드시 store.js 를 불러오기 "전"에 바꿔야 함(store.js 가 불러올 때 경로를 정하기 때문).
+// userData 가 달라지면 이중 실행 잠금도 따로 잡혀서, 실제 앱이 켜져 있어도 같이 켤 수 있음.
+if (process.env.MEMO_DATA_DIR) {
+  try {
+    const testDir = path.resolve(process.env.MEMO_DATA_DIR);
+    if (!fs.existsSync(testDir)) fs.mkdirSync(testDir, { recursive: true });
+    app.setPath('userData', testDir);
+    console.log('[테스트 모드] 데이터 폴더:', testDir);
+  } catch (err) {
+    console.error('테스트용 데이터 폴더 설정 실패 — 안전을 위해 앱을 종료함:', err);
+    process.exit(1); // 즉시 종료(실제 데이터 폴더로 넘어가지 않게)
+  }
+}
 const store = require('./src/store');
 const {
   needsChecklistMigration,
@@ -10,7 +26,10 @@ const {
   buildContentWithTables,
   needsImageMigration,
   buildContentWithImages,
+  planEventMigration,
 } = require('./src/migrate');
+const { createSync, flattenSeries, SyncError } = require('./src/gsync');
+const gauth = require('./src/gauth');
 const {
   exportMemoToObsidian,
   exportAsTxt,
@@ -389,6 +408,21 @@ function createWidgetWindow(initialPos) {
 // ---------- 달력 창 ----------
 // 메모앱과 같은 앱 안의 별도 창. 위젯 창과 같은 안정적 방식(frameless, skipTaskbar,
 // transparent 끄고 배경색 채움, opacity로 반투명)을 그대로 따름. 위치/크기는 저장·복원.
+// 달력 창 위치(x,y,크기)가 지금 연결된 화면 중 하나에 충분히 보이는지 확인
+// (창 윗부분이 가로 80px·세로 40px 이상 어떤 화면의 작업영역 안에 들어오면 보이는 것으로 봄)
+function isCalendarPosVisible(x, y, w, h) {
+  try {
+    return screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      const overlapW = Math.min(x + w, a.x + a.width) - Math.max(x, a.x);
+      const overlapH = Math.min(y + Math.min(h, 40), a.y + a.height) - Math.max(y, a.y);
+      return overlapW >= 80 && overlapH >= 20;
+    });
+  } catch (e) {
+    return true; // 확인 실패하면 예전처럼 저장 위치를 그대로 씀
+  }
+}
+
 function createCalendarWindow() {
   if (calendarWindow) {
     calendarWindow.show();
@@ -401,7 +435,9 @@ function createCalendarWindow() {
 
   const winW = typeof cal.width === 'number' ? cal.width : 340;
   const winH = typeof cal.height === 'number' ? cal.height : 360;
-  const hasSavedPos = typeof cal.x === 'number' && typeof cal.y === 'number';
+  // 저장된 위치가 지금 연결된 어떤 화면에도 안 보이면(모니터 분리·배율 변경 등) 없는 것으로 취급 → 가운데에 띄움
+  const hasSavedPos = typeof cal.x === 'number' && typeof cal.y === 'number'
+    && isCalendarPosVisible(cal.x, cal.y, winW, winH);
   const startX = hasSavedPos ? cal.x : Math.round((sw - winW) / 2);
   const startY = hasSavedPos ? cal.y : Math.round((shp - winH) / 2);
 
@@ -414,7 +450,7 @@ function createCalendarWindow() {
     minHeight: 280,
     frame: false,
     transparent: false,
-    backgroundColor: '#F7F4EC',
+    backgroundColor: '#F2F2F4',
     hasShadow: false,
     roundedCorners: false,
     alwaysOnTop: false,      // 바탕화면 위젯처럼 뒤에 깔림(항상위 아님). 뒤로/앞으로 동작은 다음 단계에서 다듬음
@@ -439,8 +475,36 @@ function createCalendarWindow() {
   // 트레이에서 직접 닫으면 toggleCalendar가 기억을 지움. 앱 종료 때는 안 지워짐(그래서 복원됨)
   saveCalendarOpenState(true);
 
+  // (0.22.1) 부팅 직후 위치 보호 — settings.calendarStartupSettleSeconds 설명 참고.
+  // 보호 시간 동안: 사용자가 직접 끌어서 옮긴 경우(will-move)만 저장, 윈도우가 멋대로 옮긴 건 저장 안 함.
+  // 보호 시간이 끝나면 원래 저장 위치로 한 번 되돌림(사용자가 그새 직접 옮겼으면 안 건드림)
+  const settleSec = Number(settings.calendarStartupSettleSeconds);
+  const settleMs = Number.isFinite(settleSec) && settleSec > 0 ? settleSec * 1000 : 0;
+  const settleUntil = Date.now() + settleMs;
+  let userMovedCalendar = false;
+  calendarWindow.on('will-move', () => { userMovedCalendar = true; });
+  if (settleMs > 0 && hasSavedPos) {
+    const thisWin = calendarWindow;
+    const restoreSavedPos = () => {
+      if (!thisWin || thisWin.isDestroyed() || userMovedCalendar) return;
+      if (!isCalendarPosVisible(startX, startY, winW, winH)) return; // 그 화면이 아직/더는 없으면 그대로 둠
+      const [cx, cy] = thisWin.getPosition();
+      if (cx !== startX || cy !== startY) thisWin.setPosition(startX, startY);
+    };
+    // 보호 시간 안에 모니터가 늦게 잡히거나 배율이 바뀌면 그때도 바로 제자리로
+    const onDisplayChange = () => restoreSavedPos();
+    screen.on('display-added', onDisplayChange);
+    screen.on('display-metrics-changed', onDisplayChange);
+    setTimeout(() => {
+      screen.removeListener('display-added', onDisplayChange);
+      screen.removeListener('display-metrics-changed', onDisplayChange);
+      restoreSavedPos();
+    }, settleMs);
+  }
+
   // 위치가 바뀌면 저장 → 다음에 켤 때 그 자리에서 시작
   calendarWindow.on('moved', () => {
+    if (Date.now() < settleUntil && !userMovedCalendar) return; // 부팅 직후 윈도우가 옮긴 건 저장 안 함
     const s = store.getSettings();
     const [x, y] = calendarWindow.getPosition();
     s.calendar = { ...(s.calendar || {}), x, y };
@@ -489,9 +553,76 @@ function broadcastMemosUpdated() {
   if (widgetWindow) widgetWindow.webContents.send('memos:updated');
   if (calendarWindow) calendarWindow.webContents.send('memos:updated');
 }
+// 달력 일정(events.json)이 바뀌면 달력 창에 알림(일정은 달력에서만 보임)
+// 여기로 오는 건 전부 "앱에서 고친 것"이라 구글 동기화도 곧 한 번 돌림(0.22.0).
+// 동기화가 바꾼 건 sendEventsUpdated 로 따로 알림(여기를 쓰면 동기화가 동기화를 계속 부름)
+function broadcastEventsUpdated() {
+  sendEventsUpdated();
+  googleSyncSoon();
+}
+function sendEventsUpdated() {
+  if (calendarWindow && !calendarWindow.isDestroyed()) calendarWindow.webContents.send('events:updated');
+}
 function broadcastTopicsUpdated() {
   if (widgetWindow) widgetWindow.webContents.send('topics:updated');
   if (calendarWindow) calendarWindow.webContents.send('topics:updated');
+}
+
+// ---------- (0.23.0) 설정창 위치·크기 기억 ----------
+// settings.json의 windowBounds.{settings|calSettings} = { x, y, width, height } 에 저장.
+// 저장된 자리가 지금 연결된 화면 어디에도 안 보이면(모니터 분리 등) 크기만 쓰고 위치는 화면 가운데.
+function getSavedWindowBounds(key, defW, defH) {
+  const all = store.getSettings().windowBounds || {};
+  const b = all[key];
+  const ok = (v) => typeof v === 'number' && Number.isFinite(v);
+  if (!b || !ok(b.width) || !ok(b.height)) return { width: defW, height: defH };
+  const size = { width: Math.round(b.width), height: Math.round(b.height) };
+  if (ok(b.x) && ok(b.y) && isCalendarPosVisible(b.x, b.y, b.width, b.height)) {
+    return { ...size, x: Math.round(b.x), y: Math.round(b.y) };
+  }
+  return size; // x,y를 안 주면 Electron이 화면 가운데에 띄움
+}
+function trackWindowBounds(win, key) {
+  const save = () => {
+    if (!win || win.isDestroyed() || win.isMinimized() || win.isMaximized()) return;
+    const s = store.getSettings();
+    s.windowBounds = { ...(s.windowBounds || {}), [key]: win.getBounds() };
+    store.saveSettings(s);
+  };
+  win.on('moved', save);
+  win.on('resized', save);
+}
+
+// ---------- (0.23.0) 달력 설정 창 ----------
+// 예전엔 달력 창 안에 겹쳐 뜨던 ⚙ 패널이었는데 좁아서 별도 창으로 뺌(renderer/calSettings).
+// 메모 설정과 달리 메모 편집을 잠그지 않음(달력 설정만 다루므로). tab: 'cal'|'look'|'ledger'|'google'
+let calSettingsWindow = null;
+function createCalendarSettingsWindow(tab) {
+  if (calSettingsWindow && !calSettingsWindow.isDestroyed()) {
+    if (calSettingsWindow.isMinimized()) calSettingsWindow.restore();
+    calSettingsWindow.show();
+    calSettingsWindow.focus();
+    if (tab) calSettingsWindow.webContents.send('calSettings:tab', tab);
+    return calSettingsWindow;
+  }
+  calSettingsWindow = new BrowserWindow({
+    ...getSavedWindowBounds('calSettings', 700, 600),
+    minWidth: 600,
+    minHeight: 440,
+    frame: true,
+    skipTaskbar: false, // 다른 창 뒤로 숨어도 작업표시줄에서 다시 찾을 수 있게(메모 설정과 같은 이유)
+    icon: ICON_PATH,
+    title: '달력 설정',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true
+    }
+  });
+  calSettingsWindow.setMenuBarVisibility(false);
+  calSettingsWindow.loadFile(path.join(__dirname, 'renderer', 'calSettings', 'index.html'), tab ? { hash: tab } : undefined);
+  trackWindowBounds(calSettingsWindow, 'calSettings');
+  calSettingsWindow.on('closed', () => { calSettingsWindow = null; });
+  return calSettingsWindow;
 }
 
 function createSettingsWindow() {
@@ -499,11 +630,11 @@ function createSettingsWindow() {
     settingsWindow.focus();
     return;
   }
+  // (0.23.0) 왼쪽 세로 메뉴가 생겨서 가로를 넓힘(600 → 800). 마지막 위치·크기를 기억해서 그 자리에 엶
   settingsWindow = new BrowserWindow({
-    width: 600,
-    height: 700,
-    minWidth: 560,
-    minHeight: 560,
+    ...getSavedWindowBounds('settings', 800, 660),
+    minWidth: 680,
+    minHeight: 480,
     frame: true,
     // 작업표시줄에 반드시 띄움. 예전엔 true(=작업표시줄에 안 보임)였는데, 설정 도중 다른
     // 프로그램을 클릭하면 설정창이 그 뒤로 숨는데 작업표시줄에도 없어서 다시 불러올 방법이
@@ -518,6 +649,7 @@ function createSettingsWindow() {
   });
   settingsWindow.setMenuBarVisibility(false);
   settingsWindow.loadFile(path.join(__dirname, 'renderer', 'settings', 'index.html'));
+  trackWindowBounds(settingsWindow, 'settings');
 
   refreshTrayMenu();
   broadcastSettingsState('app:settingsOpened');
@@ -536,14 +668,19 @@ function broadcastSettingsState(channel) {
 
 let helpWindow = null;
 
-function createHelpWindow() {
+// (0.23.0) 설명서도 왼쪽 메뉴 구조가 돼서 가로를 넓힘(620 → 880). page를 주면 그 메뉴부터 엶.
+// 마지막 위치·크기 기억(설정창들과 같은 방식)
+function createHelpWindow(page) {
+  const helpFile = path.join(__dirname, 'renderer', 'help', 'index.html');
+  const okPage = typeof page === 'string' && /^[a-z]+$/.test(page) ? page : null;
   if (helpWindow) {
+    if (okPage) helpWindow.loadFile(helpFile, { hash: okPage });
+    if (helpWindow.isMinimized()) helpWindow.restore();
     helpWindow.focus();
     return;
   }
   helpWindow = new BrowserWindow({
-    width: 620,
-    height: 720,
+    ...getSavedWindowBounds('help', 880, 720),
     minWidth: 480,
     minHeight: 480,
     frame: true,
@@ -556,7 +693,8 @@ function createHelpWindow() {
     }
   });
   helpWindow.setMenuBarVisibility(false);
-  helpWindow.loadFile(path.join(__dirname, 'renderer', 'help', 'index.html'));
+  helpWindow.loadFile(helpFile, okPage ? { hash: okPage } : undefined);
+  trackWindowBounds(helpWindow, 'help');
   helpWindow.on('closed', () => (helpWindow = null));
 }
 
@@ -1008,6 +1146,8 @@ const CALENDAR_TOPIC_NAME = '달력';
 // "달력" 주제를 찾고, 없으면 그때 만든다.
 // 앱 켤 때 미리 만들지 않는 이유: 태훈님이 주제를 지워도 다음 실행에 되살아나 버리기 때문.
 // 실제로 일정을 만들 때만 생기므로 안 쓰면 생기지도 않는다.
+// (0.21.0) 빠른 일정이 events.json 으로 가면서 지금은 부르는 곳이 없음. 예전 "달력" 주제를
+// 찾는 규칙이 적혀 있어 참고용으로 남겨둠(지우지 말 것 — 되살릴 때 다시 씀)
 function ensureCalendarTopic() {
   const topics = store.getTopics();
   let t = topics.find((x) => x && x.calendarTopic);
@@ -1240,7 +1380,7 @@ function backupRawData(baseDir) {
   try {
     const dir = path.join(baseDir, '데이터원본');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    ['memos', 'topics', 'categories', 'ledger'].forEach((key) => {
+    ['memos', 'topics', 'categories', 'ledger', 'events'].forEach((key) => {
       const src = store.getDataFilePath(key);
       if (src && fs.existsSync(src)) {
         fs.copyFileSync(src, path.join(dir, path.basename(src)));
@@ -1433,6 +1573,64 @@ function migrateImagesIntoContent() {
   }
 }
 
+// ---------- 0.21.0: "달력" 주제 메모 → 일정(events.json) 1회 복사 ----------
+// [태훈님 확정 2026-09-22] 이사가 아니라 복사. 원본 메모는 절대 안 지움.
+// 순서: ① 이미 했으면(migratedFromMemos) 끝 → ② 옮길 게 있으면 memos.json 통째 스냅샷,
+//       스냅샷 실패 시 아무것도 안 하고 중단 → ③ events.json 저장(완료 표식 포함)
+//       → ④ 원본 메모에 copiedToEventId 표식만 추가(scheduleAt·useCalendar·알람은 그대로)
+// ④가 실패해도 괜찮음: 달력은 일정의 sourceMemoId 로도 중복을 걸러냄(eventCoverage 참고).
+function migrateCalendarMemosToEvents() {
+  let data, memos, topics;
+  try {
+    data = store.getEvents();
+    if (data.migratedFromMemos) return;
+    memos = store.getMemos();
+    topics = store.getTopics();
+  } catch (err) {
+    console.error('일정 옮기기: 데이터를 읽지 못해 건너뜀', err);
+    return;
+  }
+  const nowIso = new Date().toISOString();
+  const plan = planEventMigration(memos, topics, data.events, randomUUID, nowIso);
+
+  if (plan.events.length) {
+    try {
+      const src = store.getDataFilePath('memos');
+      if (!src || !fs.existsSync(src)) throw new Error('memos.json 없음');
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, '0');
+      const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+      const dst = path.join(path.dirname(src), `memos.before-events-${stamp}.json`);
+      fs.copyFileSync(src, dst);
+      if (fs.statSync(dst).size !== fs.statSync(src).size) throw new Error('스냅샷 크기 불일치');
+    } catch (err) {
+      console.error('일정 옮기기: 스냅샷 실패 — 옮기기를 중단함(다음 실행 때 다시 시도)', err);
+      return;
+    }
+  }
+
+  try {
+    data.events = data.events.concat(plan.events);
+    data.migratedFromMemos = true;
+    store.saveEvents(data);
+  } catch (err) {
+    console.error('일정 옮기기: events.json 저장 실패 — 원본 메모는 그대로', err);
+    return;
+  }
+
+  if (!plan.links.length) return;
+  try {
+    const byId = new Map(plan.links.map((l) => [l.memoId, l.eventId]));
+    memos.forEach((m) => {
+      if (m && byId.has(m.id) && !m.copiedToEventId) m.copiedToEventId = byId.get(m.id);
+    });
+    store.saveMemos(memos);
+    console.log(`일정 옮기기 완료: ${plan.links.length}개 복사(원본 메모 유지)`);
+  } catch (err) {
+    console.error('일정 옮기기: 원본 메모 표식 저장 실패(일정은 이미 저장됨, 중복 표시는 없음)', err);
+  }
+}
+
 // ---------- 앱 시작 ----------
 
 app.whenReady().then(() => {
@@ -1442,6 +1640,7 @@ app.whenReady().then(() => {
   migrateChecklistIntoContent(); // 창을 만들기 전에 끝내야 함(메모창이 옛 데이터를 읽지 않게)
   migrateTablesIntoContent();    // 같은 이유로 여기서(체크리스트 다음에) 한 번에 끝냄
   migrateImagesIntoContent();    // 3단계. 표 다음에 붙어야 순서가 이미지 → 표 → 체크리스트 → 본문
+  migrateCalendarMemosToEvents(); // 0.21.0: "달력" 주제 메모를 일정 파일로 1회 복사(원본 유지)
 
   tray = new Tray(TRAY_ICON_PATH);
   tray.setToolTip('Memo.md - 클릭: 위젯 열기/앞으로, 더블클릭: 새 메모');
@@ -1511,6 +1710,9 @@ app.whenReady().then(() => {
   // (자정을 넘겨 계속 켜둔 경우에도 다음 확인 때 자동 기입됨)
   applyFixedExpenses();
   setInterval(applyFixedExpenses, 60 * 60 * 1000);
+
+  // 구글 캘린더 동기화(0.22.0): 연결돼 있으면 켜고 조금 뒤 한 번, 그다음 설정한 분마다
+  googleScheduleNext(20 * 1000);
 });
 
 app.on('window-all-closed', (e) => {
@@ -1557,7 +1759,11 @@ ipcMain.handle('settings:save', (event, incoming) => {
     // 시점 계산이 틀어짐 — 기존 값을 지키면서 설정창에서 바꾼 값만 덧씀
     autoBackup: { ...current.autoBackup, ...incoming.autoBackup },
     // calendar에는 설정창 폼에 없는 내부 값(창 위치/크기)이 있어서 통째로 덮어쓰면 안 됨
-    calendar: { ...current.calendar, ...incoming.calendar }
+    calendar: { ...current.calendar, ...incoming.calendar },
+    // 구글 동기화 설정은 전용 통로(google:setInterval)로만 바꿈 — 설정창 저장이 덮지 않게
+    google: current.google,
+    // (0.23.0) 설정창 위치·크기 기록도 설정창 폼에 없는 내부 값이라 항상 지금 값 유지
+    windowBounds: current.windowBounds
   };
   const saved = store.saveSettings(merged);
   applyAutoLaunch(saved.autoLaunch);
@@ -1890,52 +2096,444 @@ ipcMain.handle('memos:createNew', (event, topicId) => {
   return createNewMemo(topicId);
 });
 
-/* 달력에서 제목만 치고 엔터 → 메모창을 열지 않고 바로 일정 하나를 만듦 (0.20.0).
-   createNewMemo를 쓰지 않는 이유: 그쪽은 반드시 메모창을 띄우고 주제 템플릿까지 채우는데,
-   여기서 필요한 건 "제목 한 줄짜리 일정"뿐이라 창이 뜨면 오히려 번거로워짐.
-   시각을 안 적으면 00:00으로 저장하고 달력 목록에서는 시각을 안 보여줌
-   (memo.scheduleAt은 "YYYY-MM-DDTHH:mm" 16글자여야 메모창의 일정칸이 정상 동작함). */
-ipcMain.handle('calendar:createSchedule', (event, { dateKey, time, title } = {}) => {
-  if (settingsWindow) return null;
+/* ---------- 달력 일정 (0.21.0, 태훈님 확정 2026-09-22) ----------
+   일정은 이제 메모가 아니라 events.json 에 따로 저장한다(구글 캘린더 동기화 대비 — 폰에서
+   적은 일정이 전부 메모로 쏟아져 들어와 메모장이 불어나는 걸 막으려고 분리함).
+   - 달력 빠른 입력칸·일정 창에서 만드는 것은 전부 일정(events.json)
+   - 다른 주제 메모에 붙은 날짜(scheduleAt)는 지금처럼 메모로 남고 달력에 메모 모양으로 보임
+   - start 는 메모 scheduleAt 과 같은 "YYYY-MM-DDTHH:mm" 16글자, 00:00 = 시각 없음
+   - 시각 해석은 normalizeScheduleTime 하나만 씀
+   - 지우면 deletedAt 만 찍고 휴지통(설정 > 휴지통)으로. 60일 지나면 자동 완전삭제
+   ------------------------------------------------------------------ */
+const EVENT_START_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+// "YYYY-MM-DD"가 실제로 있는 날짜인지(2월 30일 같은 것 거름). Date 는 로컬로만 만듦
+function isRealDateKey(dateKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ''));
+  if (!m) return false;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3];
+}
+
+// 알람 계산 함수(latestDueFire)는 메모 모양을 받으므로 일정을 메모 모양으로 잠깐 감싸서 넘김
+function eventAlarmShim(ev) {
+  return { useCalendar: true, scheduleAt: ev.start, alarm: ev.alarm };
+}
+
+function newEventAlarm() {
+  return { enabled: false, before: { days: 0, hours: 0, minutes: 0 }, repeat: 'none', methods: ['notify', 'sound'], firedFor: null };
+}
+
+// 어떤 메모가 이미 일정으로 복사돼 있는지 판단할 재료(달력 표시·알람 중복 방지에 같이 씀).
+// 복사된 원본 메모는 달력에 안 그리고 알람도 안 울림(일정 쪽이 대신 울림)
+function eventCoverage(data) {
+  const d = data || store.getEvents();
+  const eventIds = new Set();
+  const sourceIds = new Set();
+  d.events.forEach((e) => { eventIds.add(e.id); if (e.sourceMemoId) sourceIds.add(e.sourceMemoId); });
+  (Array.isArray(d.purged) ? d.purged : []).forEach((p) => {
+    if (p && p.id) eventIds.add(p.id);
+    if (p && p.sourceMemoId) sourceIds.add(p.sourceMemoId);
+  });
+  return { eventIds, sourceIds };
+}
+function isMemoCoveredByEvent(memo, cov) {
+  if (!memo) return false;
+  if (memo.copiedToEventId && cov.eventIds.has(memo.copiedToEventId)) return true;
+  return cov.sourceIds.has(memo.id);
+}
+
+// 달력에서 제목만 치고 엔터 → 일정 하나 만듦. 시각을 안 적으면 00:00(시각 없음).
+// (채널 이름은 0.20.0 그대로 두고 저장 위치만 메모 → 일정으로 바꿈)
+function createEvent({ dateKey, time, title, note } = {}) {
   const cleanTitle = String(title == null ? '' : title).trim();
   if (!cleanTitle) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) return null;
-  const hhmm = normalizeScheduleTime(time) || '00:00';
-
-  const topic = ensureCalendarTopic();
+  if (!isRealDateKey(dateKey)) return null;
+  const rawTime = String(time == null ? '' : time).trim();
+  const hhmm = rawTime ? normalizeScheduleTime(rawTime) : '00:00';
+  if (!hhmm) return null;
   const now = new Date().toISOString();
-  const memo = {
+  const ev = {
     id: randomUUID(),
-    topicId: topic.id,
-    title: cleanTitle,
-    content: '',
-    color: topic.memoColor || topic.color || '#C9A24B',
+    title: cleanTitle.slice(0, 300),
+    note: String(note == null ? '' : note).replace(/\s*\r?\n\s*/g, ' ').trim().slice(0, 500),
+    start: `${dateKey}T${hhmm}`,
+    alarm: newEventAlarm(),
+    sourceMemoId: null,
+    google: null,
     createdAt: now,
     updatedAt: now,
-    position: nextNewMemoPosition(320, 380),
-    alwaysOnTop: false,
-    collapsed: false,
-    attachments: [],
-    checklist: [],
-    tables: [],
-    postSaveAction: null,
-    useCalendar: true,
-    scheduleAt: `${dateKey}T${hhmm}`,
-    alarm: {
-      enabled: false,
-      before: { days: 0, hours: 0, minutes: 0 },
-      repeat: 'none',
-      methods: ['notify', 'sound'],
-      firedFor: null
-    },
-    obsidian: { saved: false, filePath: null }
+    deletedAt: null
   };
+  const data = store.getEvents();
+  data.events.push(ev);
+  store.saveEvents(data);
+  broadcastEventsUpdated();
+  return ev;
+}
 
-  const memos = store.getMemos();
-  memos.push(memo);
-  store.saveMemos(memos);
-  broadcastMemosUpdated();
-  return memo;
+ipcMain.handle('calendar:createSchedule', (event, payload = {}) => {
+  if (settingsWindow) return null;
+  return createEvent(payload);
+});
+
+ipcMain.handle('events:list', () => {
+  const d = store.getEvents();
+  // series = 구글 반복 일정 회차(보기 전용, 0.22.0)
+  return { events: d.events, purged: Array.isArray(d.purged) ? d.purged : [], series: flattenSeries(d.googleSeries) };
+});
+
+ipcMain.handle('events:create', (event, payload = {}) => {
+  if (settingsWindow) return null;
+  return createEvent(payload);
+});
+
+// 일정 고치기. patch 에 들어온 것만 바꿈: title, note, date("YYYY-MM-DD"), time(빈 값=시각 없음), alarm
+// 하나라도 이상하면 아무것도 안 바꾸고 null(달력이 원래 값으로 되돌림)
+ipcMain.handle('events:update', (event, { id, patch } = {}) => {
+  const data = store.getEvents();
+  const ev = data.events.find((e) => e.id === id && !e.deletedAt);
+  if (!ev || !patch || typeof patch !== 'object') return null;
+  const next = { ...ev };
+  if ('title' in patch) {
+    const t = String(patch.title == null ? '' : patch.title).trim();
+    if (!t) return null;
+    next.title = t.slice(0, 300);
+  }
+  if ('note' in patch) {
+    next.note = String(patch.note == null ? '' : patch.note).replace(/\s*\r?\n\s*/g, ' ').trim().slice(0, 500);
+  }
+  if ('date' in patch || 'time' in patch) {
+    const dateKey = 'date' in patch ? patch.date : ev.start.slice(0, 10);
+    if (!isRealDateKey(dateKey)) return null;
+    let hhmm = ev.start.slice(11, 16);
+    if ('time' in patch) {
+      const raw = String(patch.time == null ? '' : patch.time).trim();
+      hhmm = raw ? normalizeScheduleTime(raw) : '00:00';
+      if (!hhmm) return null;
+    }
+    next.start = `${dateKey}T${hhmm}`;
+  }
+  if ('alarm' in patch) next.alarm = normalizeAlarm(patch.alarm);
+  // 시각이나 알람이 바뀌면 "이미 지나간 알람"이 곧바로 울리지 않게 재기준(메모와 같은 규칙)
+  if ((next.start !== ev.start || 'alarm' in patch) && next.alarm && next.alarm.enabled) {
+    next.alarm.firedFor = latestDueFire(eventAlarmShim(next), new Date());
+  }
+  next.updatedAt = new Date().toISOString();
+  Object.assign(ev, next);
+  store.saveEvents(data);
+  broadcastEventsUpdated();
+  return ev;
+});
+
+// 목록에서 시각만 고침(메모의 calendar:setScheduleTime 과 같은 규칙)
+ipcMain.handle('events:setTime', (event, { id, time } = {}) => {
+  const data = store.getEvents();
+  const ev = data.events.find((e) => e.id === id && !e.deletedAt);
+  if (!ev || !EVENT_START_RE.test(ev.start || '')) return null;
+  const raw = String(time == null ? '' : time).trim();
+  const hhmm = raw ? normalizeScheduleTime(raw) : '00:00';
+  if (!hhmm) return null;
+  const nextStart = `${ev.start.slice(0, 10)}T${hhmm}`;
+  if (nextStart === ev.start) return ev;
+  ev.start = nextStart;
+  ev.updatedAt = new Date().toISOString();
+  if (ev.alarm && ev.alarm.enabled) ev.alarm.firedFor = latestDueFire(eventAlarmShim(ev), new Date());
+  store.saveEvents(data);
+  broadcastEventsUpdated();
+  return ev;
+});
+
+// 일정 지우기 = 휴지통으로(deletedAt 만 찍음. 설정 > 휴지통에서 복구 가능)
+ipcMain.handle('events:delete', (event, id) => {
+  const data = store.getEvents();
+  const ev = data.events.find((e) => e.id === id && !e.deletedAt);
+  if (!ev) return false;
+  ev.deletedAt = new Date().toISOString();
+  store.saveEvents(data);
+  broadcastEventsUpdated();
+  return true;
+});
+
+/* ------------------------------------------------------------------
+   구글 캘린더 동기화 (0.22.0, 태훈님 확정 2026-09-22)
+   - 달력 일정(events.json)만 구글 기본 달력과 양방향. 메모 날짜는 안 보냄
+   - 충돌 = 마지막으로 고친 값 우선 / 구글에서 지운 일정 = 앱 휴지통
+   - 기본 5분마다 + 앱에서 일정을 고치면 몇 초 뒤 한 번 + 설정의 "지금 동기화"
+   - 로그인 정보는 google-token.json 에 윈도우 암호화(safeStorage)로 잠가 둠
+   - 규칙·계산은 src/gsync.js(동기화), src/gauth.js(로그인). 여기는 연결만 함
+   ------------------------------------------------------------------ */
+const GOOGLE_SOON_MS = 8 * 1000;   // 앱에서 고친 뒤 몇 초 기다렸다 보낼지(연달아 고칠 때 한 번에)
+let gSyncRunning = null;   // 진행 중인 동기화(Promise) — 두 개가 동시에 돌지 않게
+let gConnecting = false;
+let gTimer = null;
+let gSoonTimer = null;
+let gAccess = null;        // { token, expiresAt } — 메모리에만 둠
+
+// 구글에 보내는 요청. 응답이 안 오면 timeoutSec 초 뒤 끊음(안 끊으면 동기화가 영영 "진행 중"으로 멈춤)
+function gFetch(url, opts) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), store.getGoogleSettings().timeoutSec * 1000);
+  return net.fetch(url, { ...(opts || {}), signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
+function gState() {
+  const s = store.readGoogleFile('googleSync');
+  return s && typeof s === 'object' && !Array.isArray(s) ? s : {};
+}
+function gSaveState(patch) {
+  const next = { ...gState(), ...patch };
+  store.writeGoogleFile('googleSync', next);
+  return next;
+}
+function gLoadClient() {
+  const raw = store.readGoogleFile('googleClient');
+  if (!raw) return null;
+  try { return gauth.parseClientJson(JSON.stringify(raw)); } catch (e) { return null; }
+}
+function gSaveRefreshToken(refreshToken) {
+  const payload = JSON.stringify({ refreshToken });
+  let rec;
+  if (safeStorage && safeStorage.isEncryptionAvailable()) {
+    rec = { enc: 'safeStorage', data: safeStorage.encryptString(payload).toString('base64') };
+  } else {
+    rec = { enc: 'none', data: payload }; // 암호화를 못 쓰는 PC(거의 없음)
+  }
+  rec.savedAt = new Date().toISOString();
+  store.writeGoogleFile('googleToken', rec);
+}
+function gLoadRefreshToken() {
+  const rec = store.readGoogleFile('googleToken');
+  if (!rec || typeof rec.data !== 'string') return null;
+  try {
+    const text = rec.enc === 'safeStorage'
+      ? safeStorage.decryptString(Buffer.from(rec.data, 'base64'))
+      : rec.data;
+    const j = JSON.parse(text);
+    return typeof j.refreshToken === 'string' && j.refreshToken ? j.refreshToken : null;
+  } catch (e) {
+    console.error('구글 토큰 읽기 실패(다시 연결 필요):', e);
+    return null;
+  }
+}
+function gIsConnected() { return !!store.readGoogleFile('googleToken'); }
+
+function gStatus() {
+  const st = gState();
+  return {
+    hasClient: !!gLoadClient(),
+    connected: gIsConnected(),
+    account: st.account || null,
+    needsReconnect: !!st.needsReconnect,
+    syncing: !!gSyncRunning,
+    connecting: gConnecting,
+    lastSyncAt: st.lastSyncAt || null,
+    lastError: st.lastError || null,
+    lastResult: st.lastResult || null,
+    intervalMin: store.getGoogleSettings().intervalMin
+  };
+}
+function broadcastGoogleStatus() {
+  const s = gStatus();
+  [settingsWindow, calendarWindow, calSettingsWindow].forEach((w) => {
+    if (w && !w.isDestroyed()) w.webContents.send('google:status', s);
+  });
+}
+
+// 로그인이 풀림 → 한 번만 알림(누르면 설정창). 다시 연결할 때까지 자동 동기화 멈춤
+function gMarkNeedsReconnect() {
+  const st = gState();
+  if (st.needsReconnect) return;
+  gSaveState({ needsReconnect: true, lastError: '구글 연결이 풀렸어요. 다시 연결해 주세요' });
+  gAccess = null;
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: '구글 캘린더 연결이 끊겼어요',
+        body: '달력 설정 > 구글 캘린더에서 "다시 연결"을 눌러 주세요',
+        icon: ICON_PATH
+      });
+      n.on('click', () => createCalendarSettingsWindow('google'));
+      n.show();
+    }
+  } catch (e) { /* 알림 실패는 무시 */ }
+}
+
+async function gGetAccessToken(force) {
+  if (!force && gAccess && gAccess.expiresAt - 60 * 1000 > Date.now()) return gAccess.token;
+  const client = gLoadClient();
+  if (!client) throw new SyncError('구글 연결 파일이 없어요', 'noClient');
+  const rt = gLoadRefreshToken();
+  if (!rt) { gMarkNeedsReconnect(); throw new SyncError('구글 연결이 풀렸어요', 'reconnect'); }
+  try {
+    const r = await gauth.refreshAccessToken({ client, refreshToken: rt, fetch: gFetch });
+    gAccess = { token: r.accessToken, expiresAt: r.expiresAt };
+    return gAccess.token;
+  } catch (err) {
+    if (err && err.code === 'reconnect') gMarkNeedsReconnect();
+    throw err;
+  }
+}
+
+// 동기화 한 번. 이미 돌고 있으면 그걸 기다림
+function runGoogleSync() {
+  if (gSyncRunning) return gSyncRunning;
+  if (!gIsConnected() || !gLoadClient() || gState().needsReconnect) return Promise.resolve(gStatus());
+  gSyncRunning = (async () => {
+    broadcastGoogleStatus();
+    try {
+      const cfg = store.getGoogleSettings();
+      const sync = createSync({
+        fetch: gFetch,
+        getAccessToken: gGetAccessToken,
+        store: { getEvents: () => store.getEvents(), saveEvents: (d) => store.saveEvents(d) },
+        state: { get: () => gState(), save: (s) => gSaveState({ syncToken: s.syncToken || null }) },
+        cfg,
+        now: () => new Date(),
+        newId: () => randomUUID(),
+        newAlarm: newEventAlarm,
+        rebaseAlarm: (ev) => { ev.alarm.firedFor = latestDueFire(eventAlarmShim(ev), new Date()); },
+        timeZone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return undefined; } })()
+      });
+      const result = await sync.runSync();
+      gSaveState({ lastSyncAt: new Date().toISOString(), lastError: null, lastResult: result });
+      if (result.added || result.updated || result.trashed || result.restored || result.series) sendEventsUpdated();
+    } catch (err) {
+      console.error('구글 동기화 실패:', err);
+      if (err && err.code === 'reconnect') gMarkNeedsReconnect();
+      else gSaveState({ lastError: (err && err.message ? err.message : String(err)).slice(0, 300) });
+      sendEventsUpdated(); // 중간까지 반영된 게 있을 수 있음
+    } finally {
+      gSyncRunning = null;
+      broadcastGoogleStatus();
+    }
+    return gStatus();
+  })();
+  return gSyncRunning;
+}
+
+// 다음 자동 동기화 예약(설정한 분마다)
+function googleScheduleNext(delayMs) {
+  if (gTimer) clearTimeout(gTimer);
+  const ms = typeof delayMs === 'number' ? delayMs : store.getGoogleSettings().intervalMin * 60 * 1000;
+  gTimer = setTimeout(async () => {
+    gTimer = null;
+    try { await runGoogleSync(); } catch (e) { /* runGoogleSync 안에서 처리 */ }
+    googleScheduleNext();
+  }, ms);
+}
+// 앱에서 일정을 고치면 몇 초 뒤 한 번(연결돼 있을 때만)
+function googleSyncSoon() {
+  if (!gIsConnected()) return;
+  if (gSoonTimer) clearTimeout(gSoonTimer);
+  gSoonTimer = setTimeout(() => { gSoonTimer = null; runGoogleSync().catch(() => {}); }, GOOGLE_SOON_MS);
+}
+
+// 다른 계정으로 바뀌면 예전 계정과의 짝(google 기록)을 전부 끊음 → 새 계정에 새로 올라감
+function gResetLinks() {
+  const d = store.getEvents();
+  d.events.forEach((e) => { e.google = null; });
+  d.googleSeries = {};
+  d.pendingRemoteDeletes = [];
+  store.saveEvents(d);
+  gSaveState({ syncToken: null });
+}
+// 반복 일정(보기 전용) 지우기 — 연결을 끊으면 더는 맞출 수 없으니 달력에서 내림
+function gDropSeries() {
+  const d = store.getEvents();
+  if (d.googleSeries && Object.keys(d.googleSeries).length) {
+    d.googleSeries = {};
+    store.saveEvents(d);
+  }
+}
+
+ipcMain.handle('google:getStatus', () => gStatus());
+
+// 설정 > "연결 파일 선택": 구글 콘솔에서 받은 JSON 을 골라 앱 데이터 폴더에 복사해 둠
+ipcMain.handle('google:chooseClientFile', async () => {
+  const r = await dialog.showOpenDialog({
+    title: '구글 OAuth 클라이언트 파일(client_secret_….json) 선택',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  });
+  if (r.canceled || !r.filePaths.length) return { ok: false, cancelled: true, status: gStatus() };
+  try {
+    const text = fs.readFileSync(r.filePaths[0], 'utf-8');
+    const client = gauth.parseClientJson(text);
+    const old = gLoadClient();
+    store.writeGoogleFile('googleClient', JSON.parse(text.replace(/^﻿/, '')));
+    // 다른 클라이언트로 바꾸면 예전 로그인은 못 씀 → 연결 해제 상태로
+    if (old && old.clientId !== client.clientId && gIsConnected()) {
+      store.removeGoogleFile('googleToken');
+      gAccess = null;
+      gDropSeries();
+      gSaveState({ syncToken: null, needsReconnect: false });
+    }
+    broadcastGoogleStatus();
+    return { ok: true, status: gStatus() };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err), status: gStatus() };
+  }
+});
+
+// 연결(또는 다시 연결): 브라우저로 구글 로그인 → 토큰 저장 → 바로 한 번 동기화
+ipcMain.handle('google:connect', async () => {
+  if (gConnecting) return { ok: false, error: '이미 연결 중이에요(브라우저를 확인해 주세요)', status: gStatus() };
+  const client = gLoadClient();
+  if (!client) return { ok: false, error: '먼저 "연결 파일 선택"으로 구글 JSON 파일을 골라 주세요', status: gStatus() };
+  gConnecting = true;
+  broadcastGoogleStatus();
+  try {
+    const tok = await gauth.authorize({ client, fetch: gFetch, openExternal: (url) => shell.openExternal(url) });
+    const prev = gState().account || null;
+    if (prev && tok.email && prev !== tok.email) gResetLinks(); // 다른 계정
+    gSaveRefreshToken(tok.refreshToken);
+    gAccess = { token: tok.accessToken, expiresAt: tok.expiresAt };
+    gSaveState({ account: tok.email || prev, needsReconnect: false, lastError: null });
+    gConnecting = false;
+    await runGoogleSync();
+    googleScheduleNext();
+    return { ok: true, status: gStatus() };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err), status: gStatus() };
+  } finally {
+    gConnecting = false;
+    broadcastGoogleStatus();
+  }
+});
+
+// 연결 해제: 구글 쪽 권한 취소 + 토큰 지움. 앱 일정은 그대로(구글 일정도 그대로)
+ipcMain.handle('google:disconnect', async () => {
+  if (gSyncRunning) { try { await gSyncRunning; } catch (e) { /* 무시 */ } }
+  const rt = gLoadRefreshToken();
+  if (rt) await gauth.revokeToken({ token: rt, fetch: gFetch });
+  store.removeGoogleFile('googleToken');
+  gAccess = null;
+  gDropSeries();
+  gSaveState({ syncToken: null, needsReconnect: false, lastError: null });
+  sendEventsUpdated();
+  broadcastGoogleStatus();
+  return { ok: true, status: gStatus() };
+});
+
+ipcMain.handle('google:syncNow', async () => {
+  const st = gState();
+  if (!gIsConnected()) return { ok: false, error: '구글 캘린더가 연결돼 있지 않아요', status: gStatus() };
+  if (st.needsReconnect) return { ok: false, error: '구글 연결이 풀렸어요. "다시 연결"을 눌러 주세요', status: gStatus() };
+  const status = await runGoogleSync();
+  googleScheduleNext();
+  return { ok: !status.lastError, error: status.lastError || null, status };
+});
+
+// 자동 동기화 주기(분). settings.json 의 google.intervalMin 만 바꿈
+ipcMain.handle('google:setInterval', (event, minutes) => {
+  const n = Math.floor(Number(minutes));
+  if (!Number.isFinite(n) || n < 1 || n > 1440) return { ok: false, error: '1~1440분 사이로 적어 주세요', status: gStatus() };
+  const current = store.getSettings();
+  store.saveSettings({ ...current, google: { ...(current.google || {}), intervalMin: n } });
+  googleScheduleNext();
+  broadcastGoogleStatus();
+  return { ok: true, status: gStatus() };
 });
 
 /* 달력 목록에서 시각만 그 자리에서 고침 (0.20.1, 태훈님 확정 2026-08-15).
@@ -2108,7 +2706,9 @@ function focusOrOpenMemo(memoId) {
   }
 }
 // 실제로 알람을 울림: 방식(methods)에 따라 윈도우 알림/소리/메모창 띄우기.
-function fireAlarm(memo) {
+// openFn: 알림 클릭·"창 띄우기" 때 무엇을 열지(없으면 그 메모창). 일정은 달력을 열어 일정 창을 띄움
+function fireAlarm(memo, openFn) {
+  const open = typeof openFn === 'function' ? openFn : () => focusOrOpenMemo(memo.id);
   const methods = (memo.alarm && memo.alarm.methods) || [];
   const wantNotify = methods.includes('notify');
   const wantSound = methods.includes('sound');
@@ -2137,19 +2737,40 @@ function fireAlarm(memo) {
       silent: !(wantSound && !soundPlayed),
       icon: ICON_PATH
     });
-    n.on('click', () => focusOrOpenMemo(memo.id));
+    n.on('click', open);
     n.show();
   }
 
-  if (wantPopup) focusOrOpenMemo(memo.id);
+  if (wantPopup) open();
+}
+
+// 달력 창을 열고(잠금 풀어 앞으로) 그 일정의 작은 창을 띄움 — 일정 알람 클릭용
+function openEventInCalendar(eventId) {
+  const win = createCalendarWindow();
+  if (!win || win.isDestroyed()) return;
+  const send = () => {
+    if (win.isDestroyed()) return;
+    win.setFocusable(true);
+    win.focus();
+    win.moveTop();
+    win.webContents.send('calendar:activeChanged', true);
+    win.webContents.send('calendar:openEvent', eventId);
+  };
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', () => setTimeout(send, 300));
+  else send();
 }
 // 주기적으로 모든 메모의 알람을 검사해서 시각이 된 것을 울림(중복 방지: firedFor).
 function checkAlarms() {
   const now = new Date();
   const memos = store.getMemos();
+  let evData = null;
+  try { evData = store.getEvents(); } catch (e) { evData = null; }
+  // 일정으로 복사된 원본 메모는 알람을 안 울림(일정 쪽이 울림 — 같은 알람이 두 번 울리는 것 방지)
+  const cov = evData ? eventCoverage(evData) : { eventIds: new Set(), sourceIds: new Set() };
   let changed = false;
   for (const memo of memos) {
     if (!memo.useCalendar || !memo.scheduleAt || !memo.alarm || !memo.alarm.enabled) continue;
+    if (isMemoCoveredByEvent(memo, cov)) continue;
     const due = latestDueFire(memo, now);
     if (due && memo.alarm.firedFor !== due) {
       fireAlarm(memo);
@@ -2158,6 +2779,23 @@ function checkAlarms() {
     }
   }
   if (changed) store.saveMemos(memos);
+
+  // 일정(events.json) 알람 — 규칙은 메모와 똑같이 latestDueFire/firedFor 재사용
+  if (!evData) return;
+  let evChanged = false;
+  for (const ev of evData.events) {
+    if (ev.deletedAt || !ev.alarm || !ev.alarm.enabled || !EVENT_START_RE.test(ev.start || '')) continue;
+    const due = latestDueFire(eventAlarmShim(ev), now);
+    if (due && ev.alarm.firedFor !== due) {
+      fireAlarm(
+        { id: ev.id, title: ev.title || '일정 알람', content: ev.note || '', scheduleAt: ev.start, alarm: ev.alarm },
+        () => openEventInCalendar(ev.id)
+      );
+      ev.alarm.firedFor = due;
+      evChanged = true;
+    }
+  }
+  if (evChanged) store.saveEvents(evData);
 }
 
 // 알람 설정 저장. 저장 시점 기준으로 firedFor를 재기준해서 "이미 지나간 시각"으로는 곧바로
@@ -2235,12 +2873,52 @@ ipcMain.handle('memos:delete', (event, memoId) => {
 // 앱 시작할 때 자동으로 첨부파일까지 완전히 지움(아래 app.whenReady에서 호출)
 const TRASH_RETENTION_DAYS = 60;
 
-ipcMain.handle('trash:list', () => store.getTrash());
+// 휴지통 목록 = 지운 메모(trash.json) + 지운 일정(events.json 의 deletedAt 있는 것).
+// 일정은 trash.json 에 안 넣음 — 이전 버전으로 되돌렸을 때 옛 앱이 일정을 메모로 복구해버리지 않게.
+// 화면(설정 > 휴지통)에서는 kind: 'event' 로 구분함
+function trashListWithEvents() {
+  const memoTrash = store.getTrash();
+  let evTrash = [];
+  try {
+    evTrash = store.getEvents().events
+      .filter((e) => e.deletedAt)
+      .map((e) => ({ id: e.id, kind: 'event', title: e.title, start: e.start, topicId: null, deletedAt: e.deletedAt }));
+  } catch (err) { evTrash = []; }
+  return memoTrash.concat(evTrash);
+}
+// 일정을 완전히 지울 때 기록만 남김 — 원본 메모(copiedToEventId)가 달력에 다시 튀어나오지 않게
+function purgeEvents(data, ids) {
+  const set = new Set(ids);
+  const gone = data.events.filter((e) => set.has(e.id));
+  if (!gone.length) return false;
+  data.events = data.events.filter((e) => !set.has(e.id));
+  data.purged = (Array.isArray(data.purged) ? data.purged : [])
+    .concat(gone.map((e) => ({ id: e.id, sourceMemoId: e.sourceMemoId || null })));
+  // 구글에 아직 남아 있는 일정이면 다음 동기화 때 구글에서도 지우도록 적어둠(0.22.0)
+  const gids = gone.filter((e) => e.google && e.google.id && !e.google.remoteDeleted).map((e) => e.google.id);
+  if (gids.length) {
+    data.pendingRemoteDeletes = (Array.isArray(data.pendingRemoteDeletes) ? data.pendingRemoteDeletes : [])
+      .concat(gids.filter((g) => !(data.pendingRemoteDeletes || []).includes(g)));
+  }
+  return true;
+}
+
+ipcMain.handle('trash:list', () => trashListWithEvents());
 
 ipcMain.handle('trash:restore', (event, memoId) => {
+  // 일정이면 deletedAt 만 지우면 복구 끝
+  const evData = store.getEvents();
+  const ev = evData.events.find((e) => e.id === memoId && e.deletedAt);
+  if (ev) {
+    ev.deletedAt = null;
+    ev.updatedAt = new Date().toISOString();
+    store.saveEvents(evData);
+    broadcastEventsUpdated();
+    return trashListWithEvents();
+  }
   const trash = store.getTrash();
   const idx = trash.findIndex((t) => t.id === memoId);
-  if (idx === -1) return trash;
+  if (idx === -1) return trashListWithEvents();
   const [restored] = trash.splice(idx, 1);
   store.saveTrash(trash);
   delete restored.deletedAt;
@@ -2251,32 +2929,54 @@ ipcMain.handle('trash:restore', (event, memoId) => {
   // 보이지만(주제를 지워도 딸린 메모는 그대로 남는 기존 동작과 동일한 현상), 데이터는
   // 안전하게 살아있고 memos.json에도 정상적으로 들어있음
   broadcastMemosUpdated();
-  return trash;
+  return trashListWithEvents();
 });
 
 ipcMain.handle('trash:permanentDelete', (event, memoId) => {
+  const evData = store.getEvents();
+  if (evData.events.some((e) => e.id === memoId && e.deletedAt)) {
+    purgeEvents(evData, [memoId]);
+    store.saveEvents(evData);
+    broadcastEventsUpdated();
+    return trashListWithEvents();
+  }
   const trash = store.getTrash();
   const idx = trash.findIndex((t) => t.id === memoId);
-  if (idx === -1) return trash;
+  if (idx === -1) return trashListWithEvents();
   const [target] = trash.splice(idx, 1);
   store.saveTrash(trash);
   (target.attachments || []).forEach((a) => deleteStoredFile(a.storedName));
-  return trash;
+  return trashListWithEvents();
 });
 
 ipcMain.handle('trash:empty', () => {
   const trash = store.getTrash();
   trash.forEach((t) => (t.attachments || []).forEach((a) => deleteStoredFile(a.storedName)));
   store.saveTrash([]);
+  const evData = store.getEvents();
+  if (purgeEvents(evData, evData.events.filter((e) => e.deletedAt).map((e) => e.id))) {
+    store.saveEvents(evData);
+    broadcastEventsUpdated();
+  }
   return [];
 });
 
 // 보관기한(TRASH_RETENTION_DAYS)이 지난 휴지통 항목을 첨부파일까지 완전히 지움.
 // 무거운 작업이 아니라서 인터벌 타이머 없이 앱 켤 때 한 번만 확인함
 function cleanupExpiredTrash() {
+  const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  // 지운 일정도 같은 보관기한
+  try {
+    const evData = store.getEvents();
+    const expiredEv = evData.events
+      .filter((e) => e.deletedAt && new Date(e.deletedAt).getTime() < cutoff)
+      .map((e) => e.id);
+    if (purgeEvents(evData, expiredEv)) store.saveEvents(evData);
+  } catch (err) {
+    console.error('지운 일정 정리 실패(다음 실행 때 다시):', err);
+  }
   const trash = store.getTrash();
   if (!trash.length) return;
-  const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const expired = trash.filter((t) => new Date(t.deletedAt).getTime() < cutoff);
   if (!expired.length) return;
   expired.forEach((t) => (t.attachments || []).forEach((a) => deleteStoredFile(a.storedName)));
@@ -2701,11 +3401,39 @@ function restoreFromRawData(rawDir) {
     broadcastLedgerUpdated();
   }
 
+  // 달력 일정(0.21.0~): 없는 것만 추가(id 기준). 예전 백업엔 events.json 이 없어서 그냥 넘어감
+  const bakEvents = readBackupJson('events.json');
+  let eventCount = 0;
+  if (bakEvents && typeof bakEvents === 'object' && Array.isArray(bakEvents.events)) {
+    const evData = store.getEvents();
+    const evIds = new Set(evData.events.map((e) => e.id));
+    const restoredIds = new Set();
+    bakEvents.events.forEach((e) => {
+      if (e && e.id && typeof e.start === 'string' && !evIds.has(e.id)) {
+        // 되살린 일정은 구글과의 짝을 끊음 → 다음 동기화 때 구글에 새로 올라감(0.22.0).
+        // (여기 없는 일정 = 완전삭제했던 것이라 구글에서도 이미 지워졌거나 지워질 예정)
+        if (e.google && e.google.id && Array.isArray(evData.pendingRemoteDeletes)) {
+          evData.pendingRemoteDeletes = evData.pendingRemoteDeletes.filter((g) => g !== e.google.id);
+        }
+        e.google = null;
+        evData.events.push(e);
+        evIds.add(e.id);
+        restoredIds.add(e.id);
+        eventCount += 1;
+      }
+    });
+    // 완전삭제했던 일정을 백업에서 되살렸으면 "완전삭제 기록"에서도 빼줌
+    if (Array.isArray(evData.purged)) evData.purged = evData.purged.filter((p) => !(p && restoredIds.has(p.id)));
+    if (bakEvents.migratedFromMemos) evData.migratedFromMemos = true;
+    store.saveEvents(evData);
+    broadcastEventsUpdated();
+  }
+
   store.saveTopics(topics);
   store.saveMemos(memos);
   broadcastTopicsUpdated();
   broadcastMemosUpdated();
-  return { canceled: false, count: restoredCount, topicCount: newTopicCount, ledgerCount };
+  return { canceled: false, count: restoredCount, topicCount: newTopicCount, ledgerCount, eventCount };
 }
 
 // 백업 폴더에서 다시 불러오기(복구). 폴더 안의 주제별 하위폴더를 주제로, 그 안의 md/txt
@@ -2958,9 +3686,26 @@ ipcMain.handle('window:closeMemo', (event, memoId) => {
 });
 
 ipcMain.handle('window:openSettings', () => createSettingsWindow());
+ipcMain.handle('window:openCalendarSettings', (event, tab) => { createCalendarSettingsWindow(tab); });
+// 달력 설정 창의 "진행 띠 설정 → 달력에서 열기": 달력을 활성화(잠금 해제)하고 달력 위에 진행 띠 설정을 띄움.
+// 진행 띠 설정은 달력 위에서 실제 띠를 보며 고르는 화면이라 달력 쪽에 그대로 둠
+ipcMain.handle('calendar:openProgressSettings', () => {
+  const send = () => {
+    if (!calendarWindow || calendarWindow.isDestroyed()) return;
+    calendarWindow.setFocusable(true);
+    calendarWindow.show();
+    calendarWindow.focus();
+    calendarWindow.moveTop();
+    calendarWindow.webContents.send('calendar:activeChanged', true);
+    calendarWindow.webContents.send('calendar:openProgressSettings');
+  };
+  if (calendarWindow && !calendarWindow.isDestroyed()) { send(); return; }
+  const win = createCalendarWindow();
+  win.webContents.once('did-finish-load', () => setTimeout(send, 300));
+});
 ipcMain.handle('window:openWidget', () => createWidgetWindow());
 ipcMain.handle('window:openCalendar', () => { createCalendarWindow(); });
-ipcMain.handle('window:openHelp', () => createHelpWindow());
+ipcMain.handle('window:openHelp', (event, page) => createHelpWindow(page));
 
 // (7단계) 달력 잠금/활성화 전환 — 렌더러가 더블클릭을 감지하면 활성화를 요청함.
 // 활성화: 포커스 가능하게 바꾸고 앞으로 가져옴. 잠금 복귀는 blur 핸들러가 처리.

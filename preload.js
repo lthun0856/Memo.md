@@ -58,8 +58,25 @@ contextBridge.exposeInMainWorld('api', {
   getMemosByTopic: (topicId) => ipcRenderer.invoke('memos:getByTopic', topicId),
   createNewMemo: (topicId) => ipcRenderer.invoke('memos:createNew', topicId),
   // 달력에서 제목만 치고 엔터 → 메모창 없이 바로 일정 만들기 (0.20.0)
+  // (0.21.0) 이제 메모가 아니라 일정 파일(events.json)에 저장됨
   createCalendarSchedule: (dateKey, time, title) =>
     ipcRenderer.invoke('calendar:createSchedule', { dateKey, time, title }),
+  // 달력 일정(0.21.0): 메모와 분리된 일정 전용 통로
+  listEvents: () => ipcRenderer.invoke('events:list'),
+  createEvent: (payload) => ipcRenderer.invoke('events:create', payload),
+  updateEvent: (id, patch) => ipcRenderer.invoke('events:update', { id, patch }),
+  setEventTime: (id, time) => ipcRenderer.invoke('events:setTime', { id, time }),
+  deleteEvent: (id) => ipcRenderer.invoke('events:delete', id),
+  onEventsUpdated: (callback) => ipcRenderer.on('events:updated', () => callback()),
+  onCalendarOpenEvent: (callback) => ipcRenderer.on('calendar:openEvent', (e, id) => callback(id)),
+  // (0.22.0) 구글 캘린더 동기화 — 설정 > 일반 > 구글 캘린더
+  googleGetStatus: () => ipcRenderer.invoke('google:getStatus'),
+  googleChooseClientFile: () => ipcRenderer.invoke('google:chooseClientFile'),
+  googleConnect: () => ipcRenderer.invoke('google:connect'),
+  googleDisconnect: () => ipcRenderer.invoke('google:disconnect'),
+  googleSyncNow: () => ipcRenderer.invoke('google:syncNow'),
+  googleSetInterval: (minutes) => ipcRenderer.invoke('google:setInterval', minutes),
+  onGoogleStatus: (callback) => ipcRenderer.on('google:status', (e, status) => callback(status)),
   // 달력 목록에서 시각만 그 자리에서 고칠 때 (0.20.1). 날짜는 그대로 두고 "HH:mm"만 갈아끼움
   setCalendarScheduleTime: (memoId, time) =>
     ipcRenderer.invoke('calendar:setScheduleTime', { memoId, time }),
@@ -144,6 +161,12 @@ contextBridge.exposeInMainWorld('api', {
   // 창 제어
   closeMemoWindow: (memoId) => ipcRenderer.invoke('window:closeMemo', memoId),
   openSettingsWindow: () => ipcRenderer.invoke('window:openSettings'),
+  // (0.23.0) 달력 설정 전용 창. tab을 주면 그 메뉴부터('cal'|'look'|'ledger'|'google')
+  openCalendarSettingsWindow: (tab) => ipcRenderer.invoke('window:openCalendarSettings', tab),
+  onCalendarSettingsTab: (callback) => ipcRenderer.on('calSettings:tab', (e, tab) => callback(tab)),
+  // 달력 설정 창 → 달력 위에 진행 띠 설정 띄우기 / 달력 쪽에서 그 신호 받기
+  openProgressSettingsInCalendar: () => ipcRenderer.invoke('calendar:openProgressSettings'),
+  onOpenProgressSettings: (callback) => ipcRenderer.on('calendar:openProgressSettings', () => callback()),
   openWidgetWindow: () => ipcRenderer.invoke('window:openWidget'),
   openCalendarWindow: () => ipcRenderer.invoke('window:openCalendar'),
   // 날짜들("YYYY-MM-DD" 배열)의 음력 날짜를 한꺼번에 받아옴(달력창 음력 표시용)
@@ -170,7 +193,8 @@ contextBridge.exposeInMainWorld('api', {
   // 가계부 전체 기록을 CSV(엑셀용)로 저장
   exportLedgerCsv: () => ipcRenderer.invoke('ledger:exportCsv'),
   onLedgerUpdated: (callback) => ipcRenderer.on('ledger:updated', () => callback()),
-  openHelpWindow: () => ipcRenderer.invoke('window:openHelp'),
+  // page를 주면 설명서의 그 메뉴부터 엶('start'|'widget'|'memo'|'obsidian'|'calendar'|'ledger'|'settings'|'faq')
+  openHelpWindow: (page) => ipcRenderer.invoke('window:openHelp', page),
   refocusSelf: () => ipcRenderer.invoke('window:refocusSelf'),
   resizeWidget: (width, height) => ipcRenderer.invoke('widget:resize', { width, height }),
   setWidgetAlwaysOnTop: (value) => ipcRenderer.invoke('widget:setAlwaysOnTop', value),

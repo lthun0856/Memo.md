@@ -28,6 +28,18 @@ const FILES = {
   // { categories: [{id,name,color}], entries: [{id,date:"YYYY-MM-DD",categoryId,amount,memo}],
   //   settings: { payday, weeklyBudget, monthlyBudget, fixed, fixedApplied } }
   ledger: path.join(DATA_DIR, 'ledger.json'),
+  // 달력 일정(0.21.0): 메모와 분리된 일정 전용 파일. 가계부와 같은 방식(별도 파일).
+  // { version: 1, migratedFromMemos: true|false, events: [{ id, title, note, start:"YYYY-MM-DDTHH:mm",
+  //   alarm:{...메모 alarm과 같은 모양}, sourceMemoId, google, createdAt, updatedAt, deletedAt }] }
+  // deletedAt 이 있으면 휴지통에 들어간 일정(설정 > 휴지통에서 복구/완전삭제)
+  events: path.join(DATA_DIR, 'events.json'),
+  // 구글 캘린더 동기화(0.22.0). 셋 다 백업 목록에 안 넣음(로그인 정보가 백업 폴더로 새지 않게)
+  // googleClient: 태훈님이 설정에서 고른 구글 OAuth 클라이언트 JSON 복사본(코드·깃에 안 넣음)
+  // googleToken : 로그인 토큰(윈도우 암호화로 잠가서 저장)
+  // googleSync  : 동기화 상태(syncToken, 마지막 동기화 시각, 오류, 연결된 계정)
+  googleClient: path.join(DATA_DIR, 'google-client.json'),
+  googleToken: path.join(DATA_DIR, 'google-token.json'),
+  googleSync: path.join(DATA_DIR, 'google-sync.json'),
   // 공휴일 캐시(연도별). 특일정보 API 응답을 저장해둠 — 지난 연도는 다시 안 바뀌니 그대로 재사용,
   // 올해/미래 연도만 main.js에서 주기적으로 다시 확인(임시공휴일이 뒤늦게 생기는 경우 대비)
   holidays: path.join(DATA_DIR, 'holidays.json'),
@@ -133,6 +145,15 @@ const DEFAULT_SETTINGS = {
   // 다시 보일 때 저장된 내용으로 새로 만듦(내용·이미지·위치 전부 파일에 있어서 그대로 복원됨).
   // 0이면 예전처럼 절대 안 닫음. settings.json에서 직접 고칠 수 있음
   hiddenMemoCloseMinutes: 5,
+  // (0.22.1) 부팅 직후 달력 위치 보호 시간(초). 윈도우가 막 켜졌을 땐 모니터·배율·작업표시줄이
+  // 아직 준비 안 돼서 윈도우가 달력을 멋대로 옮기는데, 그 위치가 저장돼 원래 자리를 덮어쓰던 문제가 있었음.
+  // 달력이 열린 뒤 이 시간 동안은 (직접 끌어서 옮긴 게 아니면) 위치를 저장하지 않고, 시간이 지나면
+  // 저장해둔 원래 자리로 한 번 더 돌려놓음. 0이면 예전과 똑같이 동작. settings.json에서 직접 고칠 수 있음
+  calendarStartupSettleSeconds: 8,
+  // (0.23.0) 큰 그림을 메모에 넣을 때, 본문 칸 높이의 몇 %(10~100) 안에 들어오게 줄여서 넣을지.
+  // 큰 그림이 메모보다 커서 크기 손잡이가 화면 밖으로 나가던 문제 때문에 생김. 넣는 순간에만 적용되고
+  // 그다음은 메모 크기를 바꿔도 그림은 그대로(손잡이로만 바꿈). settings.json에서 직접 고칠 수 있음
+  memoImageMaxHeightPercent: 70,
   // 앱 전체 글씨체(윈도우에 설치된 글씨체 이름). 비어있으면 지금까지와 동일한 기본 글씨체 사용.
   // 각 창의 css가 var(--app-font, 기본값) 을 쓰고, renderer/common/appFont.js가 이 값을 넣어줌
   fontFamily: '',
@@ -163,7 +184,8 @@ const DEFAULT_SETTINGS = {
     showLunar: true,  // 달력에 음력 날짜 표시 여부
     bgColor: '#F7F4EC', // 달력 배경색
     opacity: 100,        // 달력 전용 투명도(30~100, 전체 투명도와 별개)
-    holidayApiKey: ''   // 공휴일(특일정보) API 인증키 — 태훈님이 ⚙설정에서 직접 입력. 비우면 공휴일 기능 꺼짐
+    holidayApiKey: '',  // 공휴일(특일정보) API 인증키 — 태훈님이 ⚙설정에서 직접 입력. 비우면 공휴일 기능 꺼짐
+    progress: null      // 진행 띠(올해 진행/D-day) 설정 — 기본값·검증은 renderer/calendar/progress.js가 담당(2026-09-16)
   },
   clickGesture: {
     single: 'list',    // 'list' | 'expandAll'
@@ -186,6 +208,15 @@ const DEFAULT_SETTINGS = {
   // 먼저 가로채서 시크릿창 대신 메모가 튀어나오는 문제가 있었음 → 안 겹치는 Ctrl+Alt+N으로 변경
   // (이미 설치해서 설정이 저장된 사용자는 기존 값 유지 — 설정에서 직접 바꿔야 함)
   newMemoShortcut: 'Control+Alt+N',
+  // 구글 캘린더 동기화(0.22.0). intervalMin 은 설정 화면에서, 나머지는 settings.json 에서 직접 고칠 수 있음
+  google: {
+    intervalMin: 5,          // 몇 분마다 자동 동기화(1~1440)
+    pastDays: 365,           // 처음 연결할 때 구글에서 가져올 과거 범위(일)
+    futureDays: 365,         // 반복 일정을 앞으로 며칠치까지 달력에 보여줄지(과거도 pastDays 만큼)
+    defaultDurationMin: 60,  // 앱에서 만든 시각 있는 일정을 구글에 보낼 때 길이(분)
+    seriesRefreshHours: 24,  // 반복 일정 목록을 몇 시간마다 새로 받을지
+    timeoutSec: 30           // 구글이 이 시간(초) 안에 답이 없으면 끊고 다음 주기에 다시
+  },
   autoBackup: {
     enabled: false,
     folderPath: '', // 자동 백업 저장 폴더(항상 이 폴더에 덮어씀)
@@ -359,6 +390,55 @@ module.exports = {
         : DEFAULT_MENTS[key];
     });
     return merged;
+  },
+  // 달력 일정: 파일이 없거나 모양이 이상해도 항상 { version, migratedFromMemos, events:[] } 로 돌려줌
+  getEvents() {
+    const raw = readJson(FILES.events, null);
+    const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    return {
+      ...data,
+      version: 1,
+      migratedFromMemos: !!data.migratedFromMemos,
+      events: Array.isArray(data.events) ? data.events.filter((e) => e && typeof e === 'object' && e.id) : []
+    };
+  },
+  saveEvents(data) {
+    writeJson(FILES.events, data);
+    return data;
+  },
+  // 구글 동기화 설정(빠진 값은 기본값으로 채움 — 예전 settings.json 에는 google 칸이 없음)
+  getGoogleSettings() {
+    const raw = readJson(FILES.settings, {});
+    const g = raw && raw.google && typeof raw.google === 'object' ? raw.google : {};
+    const def = DEFAULT_SETTINGS.google;
+    const num = (v, lo, hi, d) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : d; };
+    return {
+      intervalMin: num(g.intervalMin, 1, 1440, def.intervalMin),
+      pastDays: num(g.pastDays, 1, 3650, def.pastDays),
+      futureDays: num(g.futureDays, 1, 3650, def.futureDays),
+      defaultDurationMin: num(g.defaultDurationMin, 5, 1440, def.defaultDurationMin),
+      seriesRefreshHours: num(g.seriesRefreshHours, 1, 720, def.seriesRefreshHours),
+      timeoutSec: num(g.timeoutSec, 5, 300, def.timeoutSec)
+    };
+  },
+  // 구글 파일(googleClient/googleToken/googleSync) 읽기·쓰기·지우기
+  readGoogleFile(key) {
+    if (!['googleClient', 'googleToken', 'googleSync'].includes(key)) return null;
+    return readJson(FILES[key], null);
+  },
+  writeGoogleFile(key, data) {
+    if (!['googleClient', 'googleToken', 'googleSync'].includes(key)) return;
+    writeJson(FILES[key], data);
+  },
+  removeGoogleFile(key) {
+    if (!['googleClient', 'googleToken', 'googleSync'].includes(key)) return;
+    [FILES[key], FILES[key] + '.bak', FILES[key] + '.tmp'].forEach((f) => {
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) { console.error('구글 파일 지우기 실패:', f, e); }
+    });
+  },
+  // 파일이 실제로 있는지(옮기기 판단용 — 없는 것과 비어 있는 것을 구분)
+  hasEventsFile() {
+    return fs.existsSync(FILES.events);
   },
   saveLedger(ledger) {
     writeJson(FILES.ledger, ledger);

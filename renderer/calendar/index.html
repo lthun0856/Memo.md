@@ -23,11 +23,16 @@
         <button id="cal-view-day" class="cal-viewbtn" title="일간 보기">일</button>
       </div>
       <button id="cal-mode" class="cal-modebtn" title="가계부 모드로 전환">₩</button>
+      <!-- (0.22.0) 구글 캘린더 지금 동기화 — 연결돼 있을 때만 보임(calendar.js renderGoogleSyncBtn) -->
+      <button id="cal-gsync" class="cal-modebtn cal-gsyncbtn" title="구글 캘린더 지금 동기화" hidden>🔄</button>
       <button id="cal-settings" class="cal-modebtn" title="달력 설정">⚙</button>
       <button id="cal-stats" class="cal-modebtn cal-statsbtn" title="가계부 통계">📊</button>
       <span id="cal-lock" class="cal-lock" title="잠김 — 더블클릭하면 사용할 수 있어요">🔒</span>
       <button id="cal-close" class="cal-closebtn" title="닫기">✕</button>
     </div>
+
+    <!-- 진행 띠(올해 진행 / D-day) — 2026-09-16 추가. 클릭하면 설정 패널. calendar.js renderProgress()가 채움 -->
+    <div id="cal-progress" class="cal-progress"></div>
 
     <!-- 요일 헤더 -->
     <div id="cal-weekdays" class="cal-weekdays"></div>
@@ -40,6 +45,7 @@
   </div>
 
   <script src="../common/appFont.js"></script>
+  <script src="progress.js"></script>
   <script src="calendar.js"></script>
 </body>
 </html>

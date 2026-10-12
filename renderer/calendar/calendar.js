@@ -39,8 +39,14 @@ let ledgerMents = null;
 let spendByDate = {};
 const DELETED_CAT_COLOR = '#8A8577'; // 삭제된 분류의 기록에 쓰는 회색
 
-// 메모 일정 데이터: "YYYY-MM-DD" -> [{ id, title, color, hasAlarm, time }]
+// 달력에 그릴 항목: "YYYY-MM-DD" -> [{ kind:'event'|'memo', id, title, color, hasAlarm, time }]
+// (0.21.0) kind 'event' = 일정(events.json), 'memo' = 날짜가 붙은 메모(다른 주제 메모 등)
 let eventsByDate = {};
+let calEventsCache = []; // 일정(events.json) 전체 — 지운 것(deletedAt)은 loadEvents에서 거름
+let purgedCache = [];    // 완전삭제한 일정 기록 [{id, sourceMemoId}] — 원본 메모가 다시 안 보이게
+// (0.22.0) 구글 반복 일정 회차 [{id, masterId, title, note, start}] — 보기 전용(수정은 구글에서)
+let seriesCache = [];
+const EVENT_COLOR = '#C9A24B'; // 일정 칩 색(앱 기본 금색). 메모는 주제 색
 let memosCache = [];   // 마지막으로 불러온 전체 메모(그날 목록/새 메모에 사용)
 let topicsCache = [];  // 마지막으로 불러온 전체 주제(새 메모 주제 선택에 사용)
 const NEW_MEMO_TIME = '09:00'; // 달력에서 새 메모 만들 때 기본 시각(메모창에서 바꿀 수 있음)
@@ -56,22 +62,59 @@ function scheduleTimeLabel(scheduleAt) {
   return t === '00:00' ? '' : t;
 }
 
-function loadEvents(memos, topics) {
+// 일정으로 복사된 원본 메모인지(그렇다면 달력엔 일정 쪽만 그림 — 중복 방지).
+// main.js isMemoCoveredByEvent 와 같은 규칙
+function buildCoverage(events, purged) {
+  const eventIds = new Set();
+  const sourceIds = new Set();
+  (events || []).forEach((e) => { eventIds.add(e.id); if (e.sourceMemoId) sourceIds.add(e.sourceMemoId); });
+  (purged || []).forEach((p) => {
+    if (p && p.id) eventIds.add(p.id);
+    if (p && p.sourceMemoId) sourceIds.add(p.sourceMemoId);
+  });
+  return { eventIds, sourceIds };
+}
+
+function loadEvents(memos, topics, events, purged, series) {
   const colorByTopic = {};
   (topics || []).forEach((t) => {
     colorByTopic[t.id] = t.memoColor || t.color || null;
   });
+  const cov = buildCoverage(events, purged);
 
   const map = {};
+  // 일정(events.json)
+  (events || []).forEach((ev) => {
+    if (ev.deletedAt || typeof ev.start !== 'string') return;
+    const dateKey = ev.start.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+    const title = (ev.title && ev.title.trim()) ? ev.title.trim() : '(제목 없음)';
+    (map[dateKey] || (map[dateKey] = [])).push({
+      kind: 'event', id: ev.id, title, color: EVENT_COLOR,
+      hasAlarm: !!(ev.alarm && ev.alarm.enabled), time: scheduleTimeLabel(ev.start)
+    });
+  });
+  // (0.22.0) 구글 반복 일정 — kind 'gseries'. 모양: 🔁 표시, 누르면 보기 전용 창
+  (series || []).forEach((sv) => {
+    if (!sv || typeof sv.start !== 'string') return;
+    const dateKey = sv.start.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+    const title = (sv.title && sv.title.trim()) ? sv.title.trim() : '(제목 없음)';
+    (map[dateKey] || (map[dateKey] = [])).push({
+      kind: 'gseries', id: sv.id, title, color: EVENT_COLOR, hasAlarm: false, time: scheduleTimeLabel(sv.start)
+    });
+  });
+  // 날짜 붙은 메모(일정으로 복사된 원본은 건너뜀)
   (memos || []).forEach((m) => {
     if (!m.scheduleAt || typeof m.scheduleAt !== 'string') return;
+    if ((m.copiedToEventId && cov.eventIds.has(m.copiedToEventId)) || cov.sourceIds.has(m.id)) return;
     const dateKey = m.scheduleAt.slice(0, 10); // "YYYY-MM-DD"
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
     const time = scheduleTimeLabel(m.scheduleAt);
     const color = m.color || colorByTopic[m.topicId] || '#C9A24B';
     const title = (m.title && m.title.trim()) ? m.title.trim() : '(제목 없음)';
     const hasAlarm = !!(m.alarm && m.alarm.enabled);
-    (map[dateKey] || (map[dateKey] = [])).push({ id: m.id, title, color, hasAlarm, time });
+    (map[dateKey] || (map[dateKey] = [])).push({ kind: 'memo', id: m.id, title, color, hasAlarm, time });
   });
 
   // 같은 날 안에서는 시각 순으로 정렬(시각 없는 건 뒤로)
@@ -84,13 +127,17 @@ function loadEvents(memos, topics) {
 async function reloadData() {
   if (!window.api) return; // 미리보기 등 api 없는 환경 방어
   try {
-    const [memos, topics] = await Promise.all([
+    const [memos, topics, evData] = await Promise.all([
       window.api.getAllMemos(),
-      window.api.getTopics()
+      window.api.getTopics(),
+      window.api.listEvents ? window.api.listEvents() : Promise.resolve(null)
     ]);
     memosCache = memos || [];
     topicsCache = topics || [];
-    loadEvents(memosCache, topicsCache);
+    calEventsCache = (evData && Array.isArray(evData.events)) ? evData.events : [];
+    purgedCache = (evData && Array.isArray(evData.purged)) ? evData.purged : [];
+    seriesCache = (evData && Array.isArray(evData.series)) ? evData.series : [];
+    loadEvents(memosCache, topicsCache, calEventsCache, purgedCache, seriesCache);
     render();
   } catch (e) {
     // 데이터 로드 실패해도 달력 뼈대는 계속 보이게(조용히 무시)
@@ -399,6 +446,23 @@ function maybeShowLedgerMent(before, dateKey, entryCategoryId) {
   } catch (e) { /* 재미 기능이라 실패해도 조용히 넘어감 */ }
 }
 
+// 달력 색상 설정 → CSS 변수. 설정에 없는 항목은 기본값(calendar.css의 :root와 같은 값)
+// (2026-09-11 밝은 디자인 개편. 항목 추가시 여기·CAL_COLOR_DEFAULTS·renderer/calSettings/calSettings.js의 CAL_COLORS 세 곳을 같이 고칠 것)
+const CAL_COLOR_DEFAULTS = [
+  { key: 'bgColor',    cssVar: '--paper',   def: '#F2F2F4', label: '배경색(칸 사이)' },
+  { key: 'todayColor', cssVar: '--today',   def: '#D9A63C', label: '오늘 강조색' },
+  { key: 'sunColor',   cssVar: '--sun',     def: '#E5484D', label: '일요일·공휴일' },
+  { key: 'satColor',   cssVar: '--sat',     def: '#3B7DDD', label: '토요일' },
+  { key: 'inkColor',   cssVar: '--ink',     def: '#1D1D1F', label: '글자색' },
+  { key: 'pastColor',  cssVar: '--past-bg', def: '#F7F7F8', label: '지난 날 칸' }
+];
+function applyCalendarColors(cal) {
+  CAL_COLOR_DEFAULTS.forEach((c) => {
+    const v = (typeof cal[c.key] === 'string' && /^#[0-9a-fA-F]{6}$/.test(cal[c.key])) ? cal[c.key] : c.def;
+    document.documentElement.style.setProperty(c.cssVar, v);
+  });
+}
+
 // 설정에서 달력 관련 값 읽기(주 시작 요일·음력 표시. 없으면 일요일 시작·음력 켬)
 async function loadCalendarSettings() {
   if (!window.api || !window.api.getSettings) return;
@@ -406,9 +470,9 @@ async function loadCalendarSettings() {
     const s = await window.api.getSettings();
     weekStart = (s && s.calendar && s.calendar.weekStart === 'mon') ? 1 : 0;
     showLunar = !(s && s.calendar && s.calendar.showLunar === false);
-    // 달력 배경색(설정 > 달력). CSS 변수 하나만 바꾸면 전체 배경이 따라감
-    const bg = (s && s.calendar && s.calendar.bgColor) || '#F7F4EC';
-    document.documentElement.style.setProperty('--paper', bg);
+    // 달력 색상 6종(설정 > 달력). 각각 CSS 변수 하나에 대응하고, 나머지 색은 CSS에서 자동 계산됨
+    applyCalendarColors((s && s.calendar) || {});
+    loadProgressSettings((s && s.calendar) || {}); // 진행 띠 설정(progress.js)
     // 공휴일 캐시 초기화 — 설정을 다시 읽는 시점(최초 실행 + ⚙설정 변경 시)마다 비워서,
     // API 키를 새로 넣거나 바꿨을 때 곧바로 다시 시도하게 함(안 비우면 "키 없음" 결과가 계속 남음)
     holidayCache = {};
@@ -643,9 +707,9 @@ function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips) 
     box.className = 'cal-events';
     dayEvents.slice(0, maxChips).forEach((ev) => {
       const chip = document.createElement('div');
-      chip.className = 'cal-event';
+      chip.className = 'cal-event' + (ev.kind === 'memo' ? ' is-memo' : '') + (ev.kind === 'gseries' ? ' is-series' : '');
       chip.style.borderLeftColor = ev.color;
-      chip.title = (ev.time ? ev.time + ' ' : '') + ev.title;
+      chip.title = (ev.time ? ev.time + ' ' : '') + ev.title + (ev.kind === 'memo' ? ' (메모)' : '') + (ev.kind === 'gseries' ? ' (구글 반복 일정)' : '');
 
       const t = document.createElement('span');
       t.className = 'cal-event-title';
@@ -658,11 +722,11 @@ function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips) 
         bell.textContent = '🔔';
         chip.appendChild(bell);
       }
-      // 칩을 직접 누르면 그 메모 열기(칸 클릭으로 목록 뜨는 것과 겹치지 않게 전파 중단)
+      // 칩을 직접 누르면 일정은 일정 창, 메모는 메모창(칸 클릭 목록과 겹치지 않게 전파 중단)
       chip.addEventListener('click', (e) => {
         e.stopPropagation();
         if (locked) return; // 잠금 중엔 무반응(더블클릭으로 먼저 활성화)
-        openMemo(ev.id);
+        openItem(ev);
       });
       box.appendChild(chip);
     });
@@ -987,6 +1051,7 @@ function renderDay() {
 function render() {
   renderTitle();
   updateViewButtons();
+  renderProgress(); // 올해 진행/D-day 띠(progress.js)
   const weekdaysEl = document.getElementById('cal-weekdays');
   if (state.view === 'month') {
     weekdaysEl.style.display = '';
@@ -1093,10 +1158,16 @@ function wireControls() {
   document.getElementById('cal-mode').addEventListener('click', () => {
     if (!locked) setMode(mode === 'ledger' ? 'calendar' : 'ledger');
   });
-  // ⚙️ 달력 설정(설정창에서 이곳으로 이동 — 태훈님 요청 2026-07-24)
+  // ⚙️ 달력 설정 — (0.23.0) 달력 위에 겹쳐 뜨던 패널 대신 별도 "달력 설정" 창을 엶(renderer/calSettings)
   document.getElementById('cal-settings').addEventListener('click', () => {
-    if (!locked) openCalendarSettingsPanel();
+    if (!locked && window.api && window.api.openCalendarSettingsWindow) window.api.openCalendarSettingsWindow();
   });
+  // 달력 설정 창의 "진행 띠 설정 → 달력에서 열기" 신호(main이 달력을 먼저 활성화한 뒤 보냄)
+  if (window.api && window.api.onOpenProgressSettings) {
+    window.api.onOpenProgressSettings(() => openProgressSettingsPanel());
+  }
+  // 🔄 구글 캘린더 지금 동기화(0.22.0) — 연결돼 있을 때만 보임
+  initGoogleSyncBtn();
   // 📊 가계부 통계 보드(가계부 모드에서만 보이는 버튼 — CSS로 숨김 처리)
   document.getElementById('cal-stats').addEventListener('click', () => {
     if (!locked && mode === 'ledger') openLedgerStatsPanel();
@@ -1123,21 +1194,16 @@ function formatDayTitle(dateKey) {
   return `${m}월 ${d}일 (${WEEKDAYS[dow]})`;
 }
 
-// 그날 메모들(제목/시각/색/알람), 시각순 정렬
+// 그날 항목들(일정 + 날짜 붙은 메모). loadEvents가 이미 시각순으로 정리해 둔 걸 그대로 씀
 function memosOnDate(dateKey) {
-  const colorByTopic = {};
-  topicsCache.forEach((t) => { colorByTopic[t.id] = t.memoColor || t.color || null; });
-  return memosCache
-    .filter((m) => typeof m.scheduleAt === 'string' && m.scheduleAt.slice(0, 10) === dateKey)
-    .map((m) => ({
-      id: m.id,
-      title: (m.title && m.title.trim()) ? m.title.trim() : '(제목 없음)',
-      color: m.color || colorByTopic[m.topicId] || '#C9A24B',
-      // 00:00은 "시각을 안 적은 일정"이라 목록에 시각을 안 띄움(빠른 입력칸이 그렇게 저장함)
-      time: scheduleTimeLabel(m.scheduleAt),
-      hasAlarm: !!(m.alarm && m.alarm.enabled)
-    }))
-    .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+  return (eventsByDate[dateKey] || []).slice();
+}
+
+// 항목 열기: 일정 → 작은 일정 창, 메모 → 메모창
+function openItem(it) {
+  if (it.kind === 'event') openEventPanel(it.id);
+  else if (it.kind === 'gseries') openSeriesPanel(it.id);
+  else openMemo(it.id);
 }
 
 /* ---- 목록 줄의 시각을 그 자리에서 고치기 (0.20.1, 태훈님 확정 2026-08-15) ----
@@ -1152,7 +1218,9 @@ function memosOnDate(dateKey) {
    (위젯의 눈 아이콘이 전파를 안 막아서 생긴 문제와 같은 종류) */
 function startTimeEdit(tm, it, afterEdit) {
   if (locked) return;
-  if (!window.api || !window.api.setCalendarScheduleTime) return;
+  if (!window.api) return;
+  const setTime = it.kind === 'event' ? window.api.setEventTime : window.api.setCalendarScheduleTime;
+  if (!setTime) return;
 
   const input = document.createElement('input');
   input.type = 'text';
@@ -1171,7 +1239,7 @@ function startTimeEdit(tm, it, afterEdit) {
     const v = input.value.trim();
     if (v === (it.time || '')) { restore(); return; }   // 안 바뀌었으면 저장도 안 함
     input.disabled = true;
-    const res = await window.api.setCalendarScheduleTime(it.id, v);
+    const res = await setTime(it.id, v);
     if (!res) { restore(); return; }                    // 못 알아본 값 → 원래대로
     await reloadData();                                 // 달력 본체 다시 그리기
     if (afterEdit) afterEdit();                         // 열려 있던 목록 패널 다시 그리기
@@ -1200,8 +1268,24 @@ function startTimeEdit(tm, it, afterEdit) {
 //            (일간 뷰는 reloadData()의 render()가 알아서 다시 그리므로 안 넘김)
 function buildMemoRow(it, afterEdit) {
   const row = document.createElement('div');
-  row.className = 'cal-ov-item';
+  row.className = 'cal-ov-item' + (it.kind === 'memo' ? ' is-memo' : '') + (it.kind === 'gseries' ? ' is-series' : '');
   row.style.borderLeftColor = it.color;
+  // 메모는 앞에 📝 표시(일정과 모양으로 구분 — 누르면 메모창이 열림)
+  if (it.kind === 'memo') {
+    const mk = document.createElement('span');
+    mk.className = 'cal-ov-item-kind';
+    mk.textContent = '📝';
+    mk.title = '메모에 붙은 날짜예요(누르면 메모창이 열려요)';
+    row.appendChild(mk);
+  }
+  // 구글 반복 일정은 🔁 (보기 전용 — 시각도 여기서 못 고침)
+  if (it.kind === 'gseries') {
+    const mk = document.createElement('span');
+    mk.className = 'cal-ov-item-kind';
+    mk.textContent = '🔁';
+    mk.title = '구글 캘린더의 반복 일정이에요(고치기는 구글 캘린더에서)';
+    row.appendChild(mk);
+  }
   const t = document.createElement('span');
   t.className = 'cal-ov-item-title';
   t.textContent = it.title;
@@ -1216,13 +1300,19 @@ function buildMemoRow(it, afterEdit) {
   const tm = document.createElement('span');
   tm.className = 'cal-ov-item-time' + (it.time ? '' : ' is-empty');
   tm.textContent = it.time || '시각';
-  tm.title = '눌러서 시각만 고칠 수 있어요';
-  tm.addEventListener('click', (e) => {
-    e.stopPropagation();
-    startTimeEdit(tm, it, afterEdit);
-  });
+  if (it.kind === 'gseries') {
+    // 보기 전용: 시각이 없으면 자리도 안 만듦, 눌러도 고치기 안 뜸(줄 클릭 = 보기 창)
+    if (!it.time) tm.textContent = '';
+    tm.title = '';
+  } else {
+    tm.title = '눌러서 시각만 고칠 수 있어요';
+    tm.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startTimeEdit(tm, it, afterEdit);
+    });
+  }
   row.appendChild(tm);
-  row.addEventListener('click', () => openMemo(it.id));
+  row.addEventListener('click', () => openItem(it));
   return row;
 }
 
@@ -1297,7 +1387,8 @@ function buildQuickAddFoot(dateKey, afterAdd) {
 
   const moreBtn = document.createElement('button');
   moreBtn.className = 'cal-quick-more';
-  moreBtn.textContent = '자세히 쓰기 (본문·알람)';
+  // (0.21.0) 일정은 일정 창에서 알람·메모 한 줄까지 쓸 수 있음. 긴 본문이 필요할 때만 메모로
+  moreBtn.textContent = '메모로 자세히 쓰기';
   moreBtn.addEventListener('click', () => openTopicPicker(dateKey));
   foot.appendChild(moreBtn);
 
@@ -1351,6 +1442,339 @@ function openDayPanel(dateKey) {
   ov.appendChild(list);
   ov.appendChild(foot);
   root.appendChild(ov);
+}
+
+/* ---- 작은 일정 창 (0.21.0, 태훈님 확정 2026-09-22) ----
+   일정(events.json)을 누르면 달력 안에 뜨는 편집 칸. 메모창을 안 띄움.
+   제목 / 날짜 / 시각 / 메모 한 줄 / 알람 / 휴지통으로.
+   - 시각 해석("9" → 09:00)은 main.js normalizeScheduleTime 에서만 함(여기서 또 만들지 않음)
+   - 지우기 = 휴지통(설정 > 휴지통에서 복구 가능)
+   - 엔터 저장 시 e.isComposing 확인(한글 조합 끝내는 엔터 무시) */
+function openEventPanel(eventId) {
+  const ev = calEventsCache.find((e) => e.id === eventId && !e.deletedAt);
+  if (!ev) return;
+  closeOverlays();
+  const root = document.getElementById('cal-root');
+  const ov = document.createElement('div');
+  ov.className = 'cal-overlay cal-evpanel';
+  const origDate = ev.start.slice(0, 10);
+  const backToDay = () => openDayPanel(origDate);
+
+  const head = document.createElement('div');
+  head.className = 'cal-overlay-head';
+  const back = document.createElement('button');
+  back.className = 'cal-ov-btn';
+  back.textContent = '‹';
+  back.title = '그날 목록으로';
+  back.addEventListener('click', backToDay);
+  const title = document.createElement('div');
+  title.className = 'cal-ov-title';
+  title.textContent = '일정';
+  const spacer = document.createElement('button');
+  spacer.className = 'cal-ov-btn';
+  spacer.style.visibility = 'hidden';
+  spacer.textContent = '‹';
+  head.appendChild(back);
+  head.appendChild(title);
+  head.appendChild(spacer);
+
+  const body = document.createElement('div');
+  body.className = 'cal-ov-list cal-evform';
+
+  const mkInput = (type, cls, placeholder, value) => {
+    const el = document.createElement('input');
+    el.type = type;
+    el.className = 'cal-ledger-input ' + (cls || '');
+    if (placeholder) el.placeholder = placeholder;
+    el.value = value == null ? '' : value;
+    return el;
+  };
+  const mkLabel = (text) => {
+    const l = document.createElement('div');
+    l.className = 'cal-evform-label';
+    l.textContent = text;
+    return l;
+  };
+  const mkRow = (...els) => {
+    const r = document.createElement('div');
+    r.className = 'cal-ledger-formrow';
+    els.forEach((e) => r.appendChild(e));
+    return r;
+  };
+
+  const titleIn = mkInput('text', 'cal-evform-title', '일정 제목', ev.title || '');
+  const dateIn = mkInput('date', 'cal-evform-date', '', origDate);
+  const t0 = ev.start.slice(11, 16);
+  const timeIn = mkInput('text', 'cal-evform-time', '예: 930', t0 === '00:00' ? '' : t0);
+  timeIn.maxLength = 5;
+  timeIn.title = '비워두면 시간 없는 일정이 됩니다. 9 / 930 / 9:30 아무렇게나 쳐도 됩니다';
+  const noteIn = mkInput('text', 'cal-evform-note', '메모 한 줄(선택)', ev.note || '');
+
+  body.appendChild(mkLabel('제목'));
+  body.appendChild(titleIn);
+  body.appendChild(mkLabel('날짜 · 시각'));
+  body.appendChild(mkRow(dateIn, timeIn));
+  body.appendChild(mkLabel('메모'));
+  body.appendChild(noteIn);
+
+  // 알람(메모창 알람칸과 같은 값 모양)
+  const al = ev.alarm || {};
+  const bf = al.before || {};
+  const alarmBox = document.createElement('div');
+  alarmBox.className = 'cal-evform-alarm';
+  const onLabel = document.createElement('label');
+  onLabel.className = 'cal-evform-check';
+  const onChk = document.createElement('input');
+  onChk.type = 'checkbox';
+  onChk.checked = !!al.enabled;
+  onLabel.appendChild(onChk);
+  onLabel.appendChild(document.createTextNode(' 🔔 알람'));
+  alarmBox.appendChild(onLabel);
+
+  const detail = document.createElement('div');
+  detail.className = 'cal-evform-alarmdetail';
+  const numIn = (v, max) => {
+    const el = mkInput('number', 'cal-evform-num', '', Number(v) || 0);
+    el.min = '0';
+    el.max = String(max);
+    return el;
+  };
+  const dIn = numIn(bf.days, 3650);
+  const hIn = numIn(bf.hours, 23);
+  const mIn = numIn(bf.minutes, 59);
+  const unit = (t) => { const s2 = document.createElement('span'); s2.className = 'cal-evform-unit'; s2.textContent = t; return s2; };
+  const beforeRow = mkRow(dIn, unit('일'), hIn, unit('시간'), mIn, unit('분 전'));
+  beforeRow.title = '전부 0이면 정시에 울려요';
+  detail.appendChild(beforeRow);
+
+  const repSel = document.createElement('select');
+  repSel.className = 'cal-ledger-select cal-evform-repeat';
+  [['none', '반복 안 함'], ['daily', '매일'], ['weekly', '매주'], ['monthly', '매월'], ['yearly', '매년']].forEach(([v, t]) => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = t;
+    repSel.appendChild(o);
+  });
+  repSel.value = ['none', 'daily', 'weekly', 'monthly', 'yearly'].includes(al.repeat) ? al.repeat : 'none';
+  detail.appendChild(mkRow(repSel));
+
+  const methods = Array.isArray(al.methods) ? al.methods : ['notify', 'sound'];
+  const methodChks = {};
+  const methodRow = document.createElement('div');
+  methodRow.className = 'cal-evform-methods';
+  [['notify', '알림'], ['sound', '소리'], ['popup', '달력 띄우기']].forEach(([v, t]) => {
+    const lb = document.createElement('label');
+    lb.className = 'cal-evform-check';
+    const c = document.createElement('input');
+    c.type = 'checkbox';
+    c.checked = methods.includes(v);
+    methodChks[v] = c;
+    lb.appendChild(c);
+    lb.appendChild(document.createTextNode(' ' + t));
+    methodRow.appendChild(lb);
+  });
+  detail.appendChild(methodRow);
+  alarmBox.appendChild(detail);
+  const syncDetail = () => { detail.hidden = !onChk.checked; };
+  onChk.addEventListener('change', syncDetail);
+  syncDetail();
+  body.appendChild(mkLabel('알람'));
+  body.appendChild(alarmBox);
+
+  // 메모에서 복사된 일정이면 원본 메모를 열 수 있게(원본은 지우지 않고 남겨둠)
+  if (ev.sourceMemoId && memosCache.some((m) => m.id === ev.sourceMemoId)) {
+    const src = document.createElement('button');
+    src.className = 'cal-ledger-cancel cal-evform-source';
+    src.textContent = '📝 옮기기 전 원본 메모 열기';
+    src.title = '예전 버전에서 만든 메모를 일정으로 복사한 거예요. 원본 메모는 그대로 남아 있어요';
+    src.addEventListener('click', () => openMemo(ev.sourceMemoId));
+    body.appendChild(src);
+  }
+
+  const msg = document.createElement('div');
+  msg.className = 'cal-evform-msg';
+  body.appendChild(msg);
+
+  const foot = document.createElement('div');
+  foot.className = 'cal-ov-foot';
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'cal-newbtn cal-ledger-save';
+  saveBtn.textContent = '저장';
+  const delBtn = document.createElement('button');
+  delBtn.className = 'cal-ledger-cancel cal-evform-del';
+  delBtn.textContent = '🗑 휴지통으로';
+  delBtn.title = '설정 > 휴지통에서 60일 안에 되살릴 수 있어요';
+  foot.appendChild(mkRow(saveBtn));
+  foot.appendChild(delBtn);
+
+  let busy = false;
+  const clampNum = (el, max) => Math.max(0, Math.min(max, Math.floor(Number(el.value) || 0)));
+  async function save() {
+    if (busy || locked) return;
+    msg.textContent = '';
+    [titleIn, dateIn, timeIn].forEach((el) => el.classList.remove('invalid'));
+    if (!titleIn.value.trim()) { titleIn.classList.add('invalid'); msg.textContent = '제목을 적어주세요'; titleIn.focus(); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIn.value)) { dateIn.classList.add('invalid'); msg.textContent = '날짜를 골라주세요'; return; }
+    let mlist = Object.keys(methodChks).filter((k) => methodChks[k].checked);
+    if (onChk.checked && !mlist.length) mlist = ['notify']; // 방식을 다 끄면 울릴 방법이 없어서 알림은 남김
+    const patch = {
+      title: titleIn.value,
+      note: noteIn.value,
+      date: dateIn.value,
+      time: timeIn.value,
+      alarm: {
+        enabled: onChk.checked,
+        before: { days: clampNum(dIn, 3650), hours: clampNum(hIn, 23), minutes: clampNum(mIn, 59) },
+        repeat: repSel.value,
+        methods: mlist
+      }
+    };
+    busy = true;
+    try {
+      const res = await window.api.updateEvent(ev.id, patch);
+      if (!res) { timeIn.classList.add('invalid'); msg.textContent = '시각을 알아볼 수 없어요 (예: 930, 14:00)'; return; }
+      await reloadData();
+      openDayPanel(res.start.slice(0, 10));
+    } finally {
+      busy = false;
+    }
+  }
+  async function remove() {
+    if (busy || locked) return;
+    busy = true;
+    try {
+      await window.api.deleteEvent(ev.id);
+      await reloadData();
+      openDayPanel(origDate);
+    } finally {
+      busy = false;
+    }
+  }
+  saveBtn.addEventListener('click', save);
+  delBtn.addEventListener('click', remove);
+  [titleIn, timeIn, noteIn].forEach((el) => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); backToDay(); return; }
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      save();
+    });
+    el.addEventListener('input', () => el.classList.remove('invalid'));
+  });
+
+  ov.appendChild(head);
+  ov.appendChild(body);
+  ov.appendChild(foot);
+  root.appendChild(ov);
+  titleIn.focus();
+}
+
+/* ---- 🔄 구글 지금 동기화 버튼 (0.22.0, 태훈님 요청 2026-09-22) ----
+   예전엔 설정 > 일반에만 있어서 설정창을 열어야 했음. 달력 위쪽에서 바로 누름.
+   - 연결 안 돼 있으면 안 보임
+   - 연결이 풀렸으면 ⚠ 로 바뀌고, 누르면 설정창(다시 연결하는 곳)이 열림
+   - 도는 중엔 빙글 돌고 못 누름. 끝나면 main 이 events:updated 로 달력을 다시 그리게 함 */
+let gSyncStatus = null;
+function renderGoogleSyncBtn(st) {
+  const btn = document.getElementById('cal-gsync');
+  if (!btn) return;
+  if (st) gSyncStatus = st;
+  const s = gSyncStatus;
+  if (!s || !s.connected) { btn.hidden = true; return; }
+  btn.hidden = false;
+  const busy = !!(s.syncing || s.connecting);
+  btn.classList.toggle('is-syncing', busy && !s.needsReconnect);
+  btn.classList.toggle('is-error', !!s.needsReconnect || (!busy && !!s.lastError));
+  if (s.needsReconnect) {
+    btn.textContent = '⚠';
+    btn.title = '구글 연결이 풀렸어요 — 눌러서 설정에서 "다시 연결"';
+  } else {
+    btn.textContent = '🔄';
+    const p = (n) => String(n).padStart(2, '0');
+    const d = s.lastSyncAt ? new Date(s.lastSyncAt) : null;
+    const last = d && !isNaN(d.getTime()) ? `마지막 동기화 ${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}` : '아직 동기화 안 함';
+    btn.title = busy ? '구글 캘린더 동기화 중…'
+      : (s.lastError ? `구글 동기화 오류: ${s.lastError}\n눌러서 다시 시도` : `구글 캘린더 지금 동기화 (${last})`);
+  }
+}
+function initGoogleSyncBtn() {
+  const btn = document.getElementById('cal-gsync');
+  if (!btn || !window.api || !window.api.googleGetStatus) return;
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (locked || !gSyncStatus || !gSyncStatus.connected) return;
+    if (gSyncStatus.needsReconnect) { if (window.api.openCalendarSettingsWindow) window.api.openCalendarSettingsWindow('google'); return; }
+    if (gSyncStatus.syncing || gSyncStatus.connecting) return;
+    renderGoogleSyncBtn({ ...gSyncStatus, syncing: true });
+    try {
+      const r = await window.api.googleSyncNow();
+      if (r && r.status) renderGoogleSyncBtn(r.status);
+    } catch (err) {
+      renderGoogleSyncBtn({ ...gSyncStatus, syncing: false });
+    }
+    await reloadData();
+  });
+  if (window.api.onGoogleStatus) window.api.onGoogleStatus((st) => renderGoogleSyncBtn(st));
+  window.api.googleGetStatus().then(renderGoogleSyncBtn).catch(() => {});
+}
+
+/* ---- 구글 반복 일정 보기 창 (0.22.0, 태훈님 확정 2026-09-22) ----
+   구글 반복 일정은 앱에서 보기만. 고치거나 지우려면 구글 캘린더에서(다음 동기화 때 반영) */
+function openSeriesPanel(itemId) {
+  const sv = seriesCache.find((x) => x.id === itemId);
+  if (!sv) return;
+  closeOverlays();
+  const root = document.getElementById('cal-root');
+  const ov = document.createElement('div');
+  ov.className = 'cal-overlay cal-evpanel';
+  const dateKey = sv.start.slice(0, 10);
+  const backToDay = () => openDayPanel(dateKey);
+
+  const head = document.createElement('div');
+  head.className = 'cal-overlay-head';
+  const back = document.createElement('button');
+  back.className = 'cal-ov-btn';
+  back.textContent = '‹';
+  back.title = '그날 목록으로';
+  back.addEventListener('click', backToDay);
+  const title = document.createElement('div');
+  title.className = 'cal-ov-title';
+  title.textContent = '🔁 구글 반복 일정';
+  const spacer = document.createElement('button');
+  spacer.className = 'cal-ov-btn';
+  spacer.style.visibility = 'hidden';
+  spacer.textContent = '‹';
+  head.appendChild(back);
+  head.appendChild(title);
+  head.appendChild(spacer);
+
+  const body = document.createElement('div');
+  body.className = 'cal-ov-list cal-evform';
+  const line = (label, text) => {
+    const l = document.createElement('div');
+    l.className = 'cal-evform-label';
+    l.textContent = label;
+    const v = document.createElement('div');
+    v.className = 'cal-series-value';
+    v.textContent = text;
+    body.appendChild(l);
+    body.appendChild(v);
+  };
+  const t0 = sv.start.slice(11, 16);
+  line('제목', sv.title || '(제목 없음)');
+  line('날짜 · 시각', formatDayTitle(dateKey) + (t0 === '00:00' ? ' (종일)' : ' ' + t0));
+  if (sv.note) line('메모', sv.note);
+  const info = document.createElement('div');
+  info.className = 'cal-series-info';
+  info.textContent = '구글 캘린더의 반복 일정이라 여기서는 보기만 할 수 있어요. 고치거나 지우려면 구글 캘린더(폰·웹)에서 하세요. 다음 동기화 때 반영돼요.';
+  body.appendChild(info);
+
+  ov.appendChild(head);
+  ov.appendChild(body);
+  root.appendChild(ov);
+  ov.tabIndex = -1;
+  ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); backToDay(); } });
+  ov.focus();
 }
 
 // "+새 메모" → 주제 선택 작은 창
@@ -1583,385 +2007,8 @@ function openLedgerPanel(dateKey, editingId = null) {
 // ---- 달력 ⚙️ 설정 패널 ----
 // 메모앱 설정창에 있던 달력·가계부 설정을 이곳으로 옮김(태훈님 요청 2026-07-24).
 // 저장 버튼 없이 바꾸는 즉시 저장됨. settings.calendar만 건드림(다른 설정 무관).
-async function openCalendarSettingsPanel() {
-  closeOverlays();
-  const root = document.getElementById('cal-root');
-
-  // 현재 저장값(배경색·투명도는 모듈 변수에 없어서 설정에서 직접 읽음)
-  let cal = {};
-  try {
-    const s = await window.api.getSettings();
-    cal = (s && s.calendar) || {};
-  } catch (e) { /* 기본값으로 진행 */ }
-
-  const ov = document.createElement('div');
-  ov.className = 'cal-overlay';
-
-  const head = document.createElement('div');
-  head.className = 'cal-overlay-head';
-  const back = document.createElement('button');
-  back.className = 'cal-ov-btn';
-  back.textContent = '‹';
-  back.title = '달력으로';
-  back.addEventListener('click', closeOverlays);
-  const title = document.createElement('div');
-  title.className = 'cal-ov-title';
-  title.textContent = '달력 설정';
-  const spacer = document.createElement('button');
-  spacer.className = 'cal-ov-btn';
-  spacer.style.visibility = 'hidden';
-  spacer.textContent = '‹';
-  head.appendChild(back);
-  head.appendChild(title);
-  head.appendChild(spacer);
-
-  const list = document.createElement('div');
-  list.className = 'cal-ov-list cal-set';
-
-  const save = (patch) => {
-    if (window.api && window.api.saveCalendarSettings) window.api.saveCalendarSettings(patch);
-  };
-  const addHeading = (text) => {
-    const h = document.createElement('div');
-    h.className = 'cal-set-h';
-    h.textContent = text;
-    list.appendChild(h);
-  };
-  const addRow = () => {
-    const r = document.createElement('div');
-    r.className = 'cal-set-row';
-    list.appendChild(r);
-    return r;
-  };
-  const labeled = (inputEl, text) => {
-    const lab = document.createElement('label');
-    lab.className = 'cal-set-label';
-    lab.appendChild(inputEl);
-    lab.appendChild(document.createTextNode(' ' + text));
-    return lab;
-  };
-
-  // 주 시작 요일
-  addHeading('주 시작 요일');
-  const rWeek = addRow();
-  [['sun', '일요일'], ['mon', '월요일']].forEach(([val, text]) => {
-    const radio = document.createElement('input');
-    radio.type = 'radio';
-    radio.name = 'cal-set-weekstart';
-    radio.checked = (weekStart === 1) === (val === 'mon');
-    radio.addEventListener('change', () => { if (radio.checked) save({ weekStart: val }); });
-    rWeek.appendChild(labeled(radio, text));
-  });
-
-  // 음력 표시
-  addHeading('음력');
-  const rLunar = addRow();
-  const lunarChk = document.createElement('input');
-  lunarChk.type = 'checkbox';
-  lunarChk.checked = showLunar;
-  lunarChk.addEventListener('change', () => save({ showLunar: lunarChk.checked }));
-  rLunar.appendChild(labeled(lunarChk, '날짜 밑에 음력 표시 (예: 음 6.9)'));
-
-  // 공휴일(특일정보 API) — 인증키는 태훈님이 직접 입력(바꿔 넣을 수 있게 별도 칸으로 분리).
-  // 비워두면 공휴일 기능만 꺼지고 달력은 지금과 100% 동일하게 동작함
-  addHeading('공휴일');
-  const holiHint = document.createElement('div');
-  holiHint.className = 'cal-set-hint';
-  holiHint.textContent = '공공데이터포털 "특일정보" 인증키를 넣으면 공휴일이 빨간 숫자+이름으로 표시돼요. 비워두면 꺼져 있어요.';
-  list.appendChild(holiHint);
-  const rHoli = addRow();
-  const holiKeyInput = document.createElement('input');
-  holiKeyInput.type = 'text';
-  holiKeyInput.className = 'cal-set-name';
-  holiKeyInput.placeholder = '인증키 붙여넣기';
-  holiKeyInput.value = cal.holidayApiKey || '';
-  holiKeyInput.addEventListener('change', () => save({ holidayApiKey: holiKeyInput.value.trim() }));
-  rHoli.appendChild(holiKeyInput);
-
-  // 배경색 + 투명도
-  addHeading('배경');
-  const rBg = addRow();
-  const bgColor = document.createElement('input');
-  bgColor.type = 'color';
-  bgColor.value = cal.bgColor || '#F7F4EC';
-  bgColor.addEventListener('change', () => save({ bgColor: bgColor.value }));
-  rBg.appendChild(labeled(bgColor, '배경색'));
-  const rOp = addRow();
-  const opRange = document.createElement('input');
-  opRange.type = 'range';
-  opRange.min = '30'; opRange.max = '100'; opRange.step = '5';
-  opRange.value = typeof cal.opacity === 'number' ? cal.opacity : 100;
-  opRange.style.flex = '1';
-  const opVal = document.createElement('span');
-  opVal.className = 'cal-set-opval';
-  opVal.textContent = opRange.value + '%';
-  opRange.addEventListener('input', () => { opVal.textContent = opRange.value + '%'; });
-  opRange.addEventListener('change', () => save({ opacity: Number(opRange.value) || 100 }));
-  rOp.appendChild(document.createTextNode('투명도'));
-  rOp.appendChild(opRange);
-  rOp.appendChild(opVal);
-
-  // ---- 가계부 설정(월급날·예산·고정지출 — ledger.json에 즉시 저장) ----
-  addHeading('가계부');
-  const saveLs = async (patch) => {
-    if (!window.api || !window.api.saveLedgerSettings) return;
-    try {
-      const saved = await window.api.saveLedgerSettings(patch);
-      if (saved) ledgerSettings = saved;
-    } catch (e) { /* 저장 실패해도 패널은 유지 */ }
-  };
-  // 입력값 → 양의 정수 또는 null(비움)
-  const posIntOrNull = (v, max) => {
-    const n = Math.floor(Number(v));
-    if (!Number.isFinite(n) || n < 1) return null;
-    return max ? Math.min(n, max) : n;
-  };
-
-  // 월급날
-  const rPayday = addRow();
-  rPayday.title = '월급날을 정하면 "월급날~다음 월급 전날"을 한 달로 묶어 합계를 내요.\n'
-    + '예: 25일로 정하면 7/25~8/24 합계 — 이번 월급으로 얼마 썼는지 바로 보여요.\n'
-    + '비워두면 지금처럼 1일~말일로 집계해요.';
-  rPayday.appendChild(document.createTextNode('월급날 매달'));
-  const paydayInput = document.createElement('input');
-  paydayInput.type = 'number';
-  paydayInput.min = '1'; paydayInput.max = '31';
-  paydayInput.className = 'cal-set-num';
-  paydayInput.placeholder = '1';
-  if (ledgerSettings.payday) paydayInput.value = ledgerSettings.payday;
-  paydayInput.addEventListener('change', async () => {
-    await saveLs({ payday: posIntOrNull(paydayInput.value, 31) });
-    render(); // 하단 총합계 구간이 바뀌므로 다시 그림
-  });
-  rPayday.appendChild(paydayInput);
-  rPayday.appendChild(document.createTextNode('일 (비우면 1일~말일)'));
-
-  // 주간/월간 예산
-  const rWB = addRow();
-  rWB.title = '예산을 정하면 하단에 "예산 대비 %"가 보이고,\n예산을 80%·100%·150% 넘는 순간 위트 멘트가 떠요.\n비워두면 예산 기능이 꺼져요.';
-  rWB.appendChild(document.createTextNode('주간 예산'));
-  const weeklyInput = document.createElement('input');
-  weeklyInput.type = 'number';
-  weeklyInput.min = '1';
-  weeklyInput.className = 'cal-set-money';
-  weeklyInput.placeholder = '비우면 끔';
-  if (ledgerSettings.weeklyBudget) weeklyInput.value = ledgerSettings.weeklyBudget;
-  weeklyInput.addEventListener('change', () => saveLs({ weeklyBudget: posIntOrNull(weeklyInput.value) }));
-  rWB.appendChild(weeklyInput);
-  rWB.appendChild(document.createTextNode('원'));
-
-  const rMB = addRow();
-  rMB.title = rWB.title;
-  rMB.appendChild(document.createTextNode('월간 예산'));
-  const monthlyInput = document.createElement('input');
-  monthlyInput.type = 'number';
-  monthlyInput.min = '1';
-  monthlyInput.className = 'cal-set-money';
-  monthlyInput.placeholder = '비우면 끔';
-  if (ledgerSettings.monthlyBudget) monthlyInput.value = ledgerSettings.monthlyBudget;
-  monthlyInput.addEventListener('change', async () => {
-    await saveLs({ monthlyBudget: posIntOrNull(monthlyInput.value) });
-    render(); // 하단 "예산 대비 %" 표시가 바뀌므로
-  });
-  rMB.appendChild(monthlyInput);
-  rMB.appendChild(document.createTextNode('원'));
-
-  // 고정 지출(매달 정해진 날 자동 기입)
-  addHeading('고정 지출');
-  const fixedHint = document.createElement('div');
-  fixedHint.className = 'cal-set-hint';
-  fixedHint.textContent = '매달 정한 날짜에 자동으로 기입돼요(예: 25일 월세). 금액을 넣어야 작동해요.';
-  list.appendChild(fixedHint);
-  const fixedHost = document.createElement('div');
-  list.appendChild(fixedHost);
-
-  let fixedList = (ledgerSettings.fixed || []).map((f) => ({ ...f }));
-  const saveFixed = () => saveLs({ fixed: fixedList });
-  function renderFixed() {
-    fixedHost.innerHTML = '';
-    fixedList.forEach((f, idx) => {
-      const box = document.createElement('div');
-      box.className = 'cal-set-fixed';
-
-      const r1 = document.createElement('div');
-      r1.className = 'cal-set-row';
-      r1.appendChild(document.createTextNode('매달'));
-      const dayIn = document.createElement('input');
-      dayIn.type = 'number';
-      dayIn.min = '1'; dayIn.max = '31';
-      dayIn.className = 'cal-set-num';
-      dayIn.value = f.day || 1;
-      dayIn.addEventListener('change', () => {
-        fixedList[idx].day = posIntOrNull(dayIn.value, 31) || 1;
-        saveFixed();
-      });
-      r1.appendChild(dayIn);
-      r1.appendChild(document.createTextNode('일'));
-      const catSel = document.createElement('select');
-      catSel.className = 'cal-ledger-select';
-      ledgerCategories.forEach((c) => {
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        opt.textContent = c.name;
-        catSel.appendChild(opt);
-      });
-      if (f.categoryId) catSel.value = f.categoryId;
-      catSel.addEventListener('change', () => {
-        fixedList[idx].categoryId = catSel.value;
-        saveFixed();
-      });
-      r1.appendChild(catSel);
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'cal-set-del';
-      delBtn.textContent = '✕';
-      delBtn.title = '고정 지출 삭제(이미 기입된 기록은 남아요)';
-      delBtn.addEventListener('click', () => {
-        if (!window.confirm('이 고정 지출을 삭제할까요? 이미 기입된 기록은 남아요.')) return;
-        fixedList.splice(idx, 1);
-        saveFixed();
-        renderFixed();
-      });
-      r1.appendChild(delBtn);
-
-      const r2 = document.createElement('div');
-      r2.className = 'cal-set-row';
-      const amtIn = document.createElement('input');
-      amtIn.type = 'number';
-      amtIn.min = '1';
-      amtIn.className = 'cal-set-money';
-      amtIn.placeholder = '금액(원)';
-      if (f.amount) amtIn.value = f.amount;
-      amtIn.addEventListener('change', () => {
-        fixedList[idx].amount = posIntOrNull(amtIn.value) || 0;
-        saveFixed();
-      });
-      r2.appendChild(amtIn);
-      const memoIn = document.createElement('input');
-      memoIn.type = 'text';
-      memoIn.className = 'cal-ledger-input';
-      memoIn.placeholder = '메모(예: 월세)';
-      memoIn.value = f.memo || '';
-      memoIn.addEventListener('change', () => {
-        fixedList[idx].memo = memoIn.value.trim();
-        saveFixed();
-      });
-      r2.appendChild(memoIn);
-
-      box.appendChild(r1);
-      box.appendChild(r2);
-      fixedHost.appendChild(box);
-    });
-  }
-  renderFixed();
-  const addFixedBtn = document.createElement('button');
-  addFixedBtn.type = 'button';
-  addFixedBtn.className = 'cal-newbtn cal-set-addcat';
-  addFixedBtn.textContent = '+ 고정 지출 추가';
-  addFixedBtn.addEventListener('click', () => {
-    const t = todayParts();
-    fixedList.push({
-      id: 'fix-' + Date.now(),
-      day: 1,
-      categoryId: (ledgerCategories[0] && ledgerCategories[0].id) || 'etc',
-      amount: 0,
-      memo: '',
-      // 등록일 — 등록한 날보다 앞선 날짜로는 자동 기입 안 함(다음 달부터 정상 작동)
-      createdAt: dateKeyOf(t.y, t.m, t.d)
-    });
-    renderFixed(); // 금액을 넣고 저장되기 전까지는 자동 기입 안 됨
-  });
-  list.appendChild(addFixedBtn);
-
-  // ("멘트 파일 열기" 버튼은 태훈님 요청으로 뺌(2026-07-24) — 멘트.json 직접 수정은 여전히
-  //  가능하고 IPC(ledger:openMentsFile)도 남아 있음. 버튼만 없앤 것)
-
-  // 엑셀(CSV) 내보내기 — 전체 지출 기록을 표 파일로 저장(엑셀에서 바로 열림)
-  const exportBtn = document.createElement('button');
-  exportBtn.type = 'button';
-  exportBtn.className = 'cal-newbtn cal-set-addcat';
-  exportBtn.textContent = '엑셀로 내보내기 (CSV)';
-  exportBtn.title = '전체 지출 기록을 날짜·분류·금액·메모 표로 저장해요. 엑셀에서 바로 열려요.';
-  exportBtn.addEventListener('click', async () => {
-    if (!window.api || !window.api.exportLedgerCsv) return;
-    try {
-      const r = await window.api.exportLedgerCsv();
-      if (r && !r.canceled) showLedgerToast(`저장 완료! 지출 ${r.count}건을 내보냈어요 📊`);
-    } catch (e) { /* 실패해도 조용히 */ }
-  });
-  list.appendChild(exportBtn);
-
-  // 가계부 분류 관리(즉시 저장 — ledger.json)
-  addHeading('가계부 분류');
-  const hint = document.createElement('div');
-  hint.className = 'cal-set-hint';
-  hint.textContent = '색·이름 수정과 추가·삭제. 분류를 삭제해도 기록은 남아요(색만 회색).';
-  list.appendChild(hint);
-  const catHost = document.createElement('div');
-  list.appendChild(catHost);
-
-  let cats = ledgerCategories.map((c) => ({ ...c }));
-  async function saveCats() {
-    if (!window.api.saveLedgerCategories) return;
-    const saved = await window.api.saveLedgerCategories(cats);
-    if (saved) cats = saved.map((c) => ({ ...c }));
-    // onLedgerUpdated 신호로 달력 그리드도 자동 갱신됨
-  }
-  function renderCats() {
-    catHost.innerHTML = '';
-    cats.forEach((cat, idx) => {
-      const r = document.createElement('div');
-      r.className = 'cal-set-row';
-      const color = document.createElement('input');
-      color.type = 'color';
-      color.value = cat.color || '#8A8577';
-      color.addEventListener('change', async () => {
-        cats[idx].color = color.value;
-        await saveCats();
-      });
-      const name = document.createElement('input');
-      name.type = 'text';
-      name.value = cat.name || '';
-      name.className = 'cal-set-name';
-      name.addEventListener('change', async () => {
-        cats[idx].name = name.value.trim() || cat.name;
-        await saveCats();
-        renderCats();
-      });
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'cal-set-del';
-      del.textContent = '✕';
-      del.title = '분류 삭제';
-      del.addEventListener('click', async () => {
-        if (cats.length <= 1) return; // 최소 1개는 남김
-        if (!window.confirm('이 분류를 삭제할까요? 기록은 남지만 색은 회색이 돼요.')) return;
-        cats.splice(idx, 1);
-        await saveCats();
-        renderCats();
-      });
-      r.appendChild(color);
-      r.appendChild(name);
-      r.appendChild(del);
-      catHost.appendChild(r);
-    });
-  }
-  renderCats();
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'cal-newbtn cal-set-addcat';
-  addBtn.textContent = '+ 분류 추가';
-  addBtn.addEventListener('click', async () => {
-    cats.push({ id: 'cat-' + Date.now(), name: '새 분류', color: '#C9A24B' });
-    await saveCats();
-    renderCats();
-  });
-  list.appendChild(addBtn);
-
-  ov.appendChild(head);
-  ov.appendChild(list);
-  root.appendChild(ov);
-}
+// (0.23.0) 예전 ⚙ 달력 설정 패널(openCalendarSettingsPanel)은 별도 창 renderer/calSettings로 옮기며 삭제함.
+// 원본은 인계서/백업_설정개편_20261008/calendar/calendar.js 에 있음
 
 // ---- 📊 가계부 통계 보드 ----
 // ①월별 지출 추이(최근 6사이클) ②분류별 비율(이번 사이클) ③지난 사이클 대비 증감
@@ -2151,6 +2198,15 @@ async function init() {
   // 메모/주제가 바뀌면 달력도 자동 갱신(메인이 memos:updated/topics:updated를 보내줌)
   if (window.api) {
     if (window.api.onMemosUpdated) window.api.onMemosUpdated(() => reloadData());
+    // (0.21.0) 일정(events.json)이 바뀌면 다시 그림 + 알람 클릭 시 그 일정 창 열기
+    if (window.api.onEventsUpdated) window.api.onEventsUpdated(() => reloadData());
+    if (window.api.onCalendarOpenEvent) {
+      window.api.onCalendarOpenEvent(async (id) => {
+        await reloadData();
+        setLocked(false);
+        openEventPanel(id);
+      });
+    }
     if (window.api.onTopicsUpdated) window.api.onTopicsUpdated(() => reloadData());
     // 가계부가 바뀌면(설정에서 분류 수정 포함) 다시 읽어서 다시 그림
     if (window.api.onLedgerUpdated) {

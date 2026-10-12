@@ -6,329 +6,451 @@
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body>
-  <div class="wrap">
+  <!-- (0.23.0) 설정창 개편: 위쪽 가로 탭 → 왼쪽 세로 메뉴 + 오른쪽 카드.
+       디자인시안/설정화면_디자인시안.html 기준. 기능이 연결된 id는 전부 예전 그대로(위치만 옮김).
+       탭 버튼의 id(tabBtnXxx)는 글자 칸(span)으로 옮김 — settings.js가 textContent로 글자를 넣는데
+       버튼 자체에 넣으면 아이콘까지 지워지기 때문 -->
+  <div class="layout">
+    <nav class="side" id="tabs">
+      <button type="button" class="tab-btn" data-tab="general"><span class="ic">⚙</span><span class="tab-text" id="tabBtnGeneral"></span></button>
+      <button type="button" class="tab-btn" data-tab="look"><span class="ic ic-sm">Aa</span><span class="tab-text" id="tabBtnLook"></span></button>
+      <button type="button" class="tab-btn" data-tab="widget"><span class="ic">▤</span><span class="tab-text" id="tabBtnWidget"></span></button>
+      <div class="side-grp" id="sideGroupMemo"></div>
+      <button type="button" class="tab-btn" data-tab="topics"><span class="ic">#</span><span class="tab-text" id="tabBtnTopics"></span></button>
+      <button type="button" class="tab-btn" data-tab="edit"><span class="ic">✎</span><span class="tab-text" id="tabBtnEdit"></span></button>
+      <button type="button" class="tab-btn" data-tab="md"><span class="ic ic-sm">M↓</span><span class="tab-text" id="tabBtnMd"></span></button>
+      <div class="side-grp" id="sideGroupManage"></div>
+      <button type="button" class="tab-btn" data-tab="backup"><span class="ic">⇩</span><span class="tab-text" id="tabBtnBackup"></span></button>
+      <button type="button" class="tab-btn" data-tab="shortcut"><span class="ic">⌨</span><span class="tab-text" id="tabBtnShortcut"></span></button>
+      <button type="button" class="tab-btn" data-tab="trash"><span class="ic">🗑</span><span class="tab-text" id="tabBtnTrash"></span></button>
+      <button type="button" class="tab-btn" data-tab="help"><span class="ic">?</span><span class="tab-text" id="tabBtnHelp"></span></button>
+    </nav>
 
-    <div class="tabs" id="tabs">
-      <button type="button" class="tab-btn" data-tab="topics" id="tabBtnTopics"></button>
-      <button type="button" class="tab-btn" data-tab="general" id="tabBtnGeneral"></button>
-      <button type="button" class="tab-btn" data-tab="widget" id="tabBtnWidget"></button>
-      <button type="button" class="tab-btn" data-tab="md" id="tabBtnMd"></button>
-      <button type="button" class="tab-btn" data-tab="edit" id="tabBtnEdit"></button>
-      <button type="button" class="tab-btn" data-tab="trash" id="tabBtnTrash"></button>
-      <button type="button" class="tab-btn" data-tab="help" id="tabBtnHelp"></button>
-    </div>
+    <div class="main">
+      <div class="scroll" id="mainScroll">
 
-    <div class="tab-panel" data-panel="topics">
-      <section>
-        <h2 id="topicsHeading"></h2>
-        <p class="hint" id="topicMainHint"></p>
-        <p class="hint md-feature-only" id="topicMdTipHint"></p>
-        <div class="field md-feature-only" id="categorySection">
-          <span class="field-label" id="categoryFieldLabel"></span>
-          <div id="categoryList" class="category-list"></div>
-          <div class="topic-form-row">
-            <input type="color" id="newCategoryColor" value="#8A8574" />
-            <div class="field field-grow">
-              <input type="text" id="newCategoryName" />
-            </div>
-            <button id="btnAddCategory" type="button"></button>
+        <!-- ───── 일반 ───── -->
+        <div class="tab-panel" data-panel="general">
+          <h1 class="panel-title" data-title-for="general"></h1>
+          <h2 id="generalHeading" class="visually-hidden"></h2>
+          <div class="card">
+            <label class="row">
+              <span class="lab"><b id="autoLaunchLabel"></b><small class="hint" id="autoLaunchDevHint" hidden></small></span>
+              <input type="checkbox" class="sw" id="autoLaunch" />
+            </label>
+            <label class="row">
+              <span class="lab"><b id="multiModeLabel"></b></span>
+              <input type="checkbox" class="sw" id="multiMode" />
+            </label>
+            <label class="row">
+              <span class="lab"><b id="confirmMemoDeleteLabel"></b></span>
+              <input type="checkbox" class="sw" id="confirmMemoDelete" />
+            </label>
           </div>
-          <p class="hint hint-error" id="categoryNameError" hidden></p>
         </div>
 
-        <p class="hint" id="topicEditNameHint"></p>
-        <div id="topicList" class="topic-list"></div>
+        <!-- ───── 모양 ───── -->
+        <div class="tab-panel" data-panel="look">
+          <h1 class="panel-title" data-title-for="look"></h1>
+          <section class="sec">
+            <h2 id="opacityHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><small class="hint" id="opacityHint"></small></span>
+                <span class="ctrl range">
+                  <input type="range" id="opacityRange" min="10" max="100" step="5" />
+                  <span id="opacityValue" class="range-val">100%</span>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="fontHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><small class="hint" id="fontHint"></small></span>
+                <span class="ctrl"><select id="fontFamily"></select></span>
+              </div>
+              <div class="row row-stack" id="fontCustomRow" hidden>
+                <input type="text" id="fontFamilyCustom" />
+                <small class="hint" id="fontCustomHint" hidden></small>
+              </div>
+              <div class="row row-stack">
+                <div id="fontPreview" class="font-preview"></div>
+              </div>
+            </div>
+          </section>
+        </div>
 
-        <div class="topic-form">
-          <div class="topic-form-row">
-            <div class="field md-feature-only" id="newTopicParentField">
-              <span class="field-label" id="newTopicParentLabel"></span>
-              <select id="newTopicParent"></select>
+        <!-- ───── 위젯 ───── -->
+        <div class="tab-panel" data-panel="widget">
+          <h1 class="panel-title" data-title-for="widget"></h1>
+          <h2 id="widgetTabHeading" class="visually-hidden"></h2>
+          <section class="sec">
+            <h2 id="widgetColorGroupLabel"></h2>
+            <div class="card">
+              <label class="row">
+                <span class="lab"><b id="widgetTitlebarColorLabel"></b></span>
+                <input type="color" id="widgetTitlebarColor" class="color-input" />
+              </label>
             </div>
-            <div class="field field-grow">
-              <span class="field-label" id="newTopicNameLabel"></span>
-              <input type="text" id="newTopicName" />
+          </section>
+          <section class="sec">
+            <h2 id="widgetSizeGroupLabel"></h2>
+            <div class="card">
+              <label class="row">
+                <span class="lab"><b id="widgetAutoResizeLabel"></b></span>
+                <input type="checkbox" class="sw" id="widgetAutoResize" />
+              </label>
+              <div class="row">
+                <span class="lab"><b id="widgetWidthLabel"></b></span>
+                <span class="ctrl"><input type="number" id="widgetWidth" min="180" max="600" /></span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="widgetHeightLabel"></b></span>
+                <span class="ctrl"><input type="number" id="widgetHeight" min="200" max="900" /></span>
+              </div>
             </div>
+          </section>
+          <section class="sec">
+            <h2 id="widgetHandlePositionGroupLabel"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><small class="hint" id="handlePositionHint"></small></span>
+                <span class="ctrl seg">
+                  <label><input type="radio" name="handlePosition" value="left" id="handlePositionLeft" /><span id="handlePositionLeftLabel"></span></label>
+                  <label><input type="radio" name="handlePosition" value="right" id="handlePositionRight" /><span id="handlePositionRightLabel"></span></label>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="widgetGestureGroupLabel"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="widgetSingleClickLabel"></b></span>
+                <span class="ctrl"><select id="gestureSingle"></select></span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="widgetDoubleClickLabel"></b></span>
+                <span class="ctrl"><select id="gestureDouble"></select></span>
+              </div>
+              <div class="row row-stack"><small class="hint" id="widgetGestureHint"></small></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ───── 주제 ───── (안쪽 목록·입력칸은 settings.js가 그리는 그대로) -->
+        <div class="tab-panel" data-panel="topics">
+          <h1 class="panel-title" data-title-for="topics"></h1>
+          <h2 id="topicsHeading" class="visually-hidden"></h2>
+          <p class="hint panel-hint" id="topicMainHint"></p>
+          <p class="hint panel-hint md-feature-only" id="topicMdTipHint"></p>
+
+          <section class="sec md-feature-only" id="categorySection">
+            <h2 id="categoryFieldLabel"></h2>
+            <div class="card card-pad">
+              <div id="categoryList" class="category-list"></div>
+              <div class="topic-form-row">
+                <input type="color" id="newCategoryColor" value="#8A8574" />
+                <div class="field field-grow">
+                  <input type="text" id="newCategoryName" />
+                </div>
+                <button id="btnAddCategory" type="button"></button>
+              </div>
+              <p class="hint hint-error" id="categoryNameError" hidden></p>
+            </div>
+          </section>
+
+          <section class="sec">
+            <h2 id="topicListHeading"></h2>
+            <p class="hint panel-hint" id="topicEditNameHint"></p>
+            <div id="topicList" class="topic-list"></div>
+          </section>
+
+          <section class="sec">
+            <h2 id="topicNewHeading"></h2>
+            <div class="topic-form">
+              <div class="topic-form-row">
+                <div class="field md-feature-only" id="newTopicParentField">
+                  <span class="field-label" id="newTopicParentLabel"></span>
+                  <select id="newTopicParent"></select>
+                </div>
+                <div class="field field-grow">
+                  <span class="field-label" id="newTopicNameLabel"></span>
+                  <input type="text" id="newTopicName" />
+                </div>
+              </div>
+              <div class="topic-form-row">
+                <div class="field field-grow">
+                  <span class="field-label" id="newTopicDescLabel"></span>
+                  <input type="text" id="newTopicDesc" />
+                </div>
+                <div class="field field-grow">
+                  <span class="field-label" id="newTopicDefaultTitleLabel"></span>
+                  <input type="text" id="newTopicDefaultTitle" />
+                </div>
+              </div>
+              <div class="topic-form-row">
+                <label class="check-row"><input type="checkbox" id="newTopicSkipTitle" /> <span id="newTopicSkipTitleLabel"></span></label>
+              </div>
+              <div class="topic-form-row">
+                <label class="check-row"><input type="checkbox" id="newTopicUseCalendar" checked /> <span id="newTopicUseCalendarLabel"></span></label>
+              </div>
+              <div class="topic-form-row topic-form-row-appearance">
+                <div class="field">
+                  <span class="field-label" id="newTopicCharLabel"></span>
+                  <input type="text" id="newTopicChar" maxlength="2" class="char-input" />
+                </div>
+                <div class="field-color-group">
+                  <span class="color-copy-pair">
+                    <label class="mini-label"><span id="newTopicColorLabel"></span> <input type="color" id="newTopicColor" value="#8A8574" /></label>
+                    <button type="button" class="copy-color-btn" data-copy-for="newTopicColor"></button>
+                    <button type="button" class="paste-color-btn" data-paste-for="newTopicColor"></button>
+                  </span>
+                  <span class="color-copy-pair">
+                    <label class="mini-label"><span id="newTopicTextColorLabel"></span> <input type="color" id="newTopicTextColor" value="#FFFFFF" /></label>
+                    <button type="button" class="copy-color-btn" data-copy-for="newTopicTextColor"></button>
+                    <button type="button" class="paste-color-btn" data-paste-for="newTopicTextColor"></button>
+                  </span>
+                  <span class="color-copy-pair">
+                    <label class="mini-label"><span id="newTopicMemoColorLabel"></span> <input type="color" id="newTopicMemoColor" value="#8A8574" /></label>
+                    <button type="button" class="copy-color-btn" data-copy-for="newTopicMemoColor"></button>
+                    <button type="button" class="paste-color-btn" data-paste-for="newTopicMemoColor"></button>
+                  </span>
+                </div>
+              </div>
+              <p class="hint hint-error" id="topicNameError" hidden></p>
+              <div class="topic-form-row topic-form-row-submit">
+                <button id="btnAddTopic"></button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ───── 편집 ───── -->
+        <div class="tab-panel" data-panel="edit">
+          <h1 class="panel-title" data-title-for="edit"></h1>
+          <section class="sec">
+            <h2 id="editHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="countLabel"></b><small class="hint" id="editHint"></small></span>
+                <span class="ctrl"><input type="number" id="specialCharCount" min="0" max="20" /></span>
+              </div>
+              <div class="row row-stack">
+                <div id="specialCharInputs" class="special-char-inputs"></div>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="refHeading"></h2>
+            <div class="card">
+              <div class="row row-stack">
+                <small class="hint" id="refHint"></small>
+                <div class="special-char-reference">
+                  <div class="special-char-ref-group">
+                    <span class="special-char-ref-label" id="refShapes"></span>
+                    <span class="special-char-ref-chars">● ○ ■ □ ▲ △ ▼ ▽ ◆ ◇ ★ ☆</span>
+                  </div>
+                  <div class="special-char-ref-group">
+                    <span class="special-char-ref-label" id="refArrows"></span>
+                    <span class="special-char-ref-chars">→ ← ↑ ↓ ↔ ↕ ⇒ ⇐ ⇔</span>
+                  </div>
+                  <div class="special-char-ref-group">
+                    <span class="special-char-ref-label" id="refPunctuation"></span>
+                    <span class="special-char-ref-chars">※ ‰ ℃ § ¶ † ‡ • ◎</span>
+                  </div>
+                  <div class="special-char-ref-group">
+                    <span class="special-char-ref-label" id="refBrackets"></span>
+                    <span class="special-char-ref-chars">「」『』〈〉《》【】〔〕</span>
+                  </div>
+                  <div class="special-char-ref-group">
+                    <span class="special-char-ref-label" id="refMath"></span>
+                    <span class="special-char-ref-chars">± × ÷ ≠ ≤ ≥ ∞ √</span>
+                  </div>
+                  <div class="special-char-ref-group">
+                    <span class="special-char-ref-label" id="refNumbers"></span>
+                    <span class="special-char-ref-chars">① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ───── MD설정 ───── -->
+        <div class="tab-panel" data-panel="md">
+          <h1 class="panel-title" data-title-for="md"></h1>
+          <div class="card">
+            <label class="row">
+              <span class="lab"><b id="mdFeatureLabel"></b><small class="hint" id="mdFeatureHint"></small></span>
+              <input type="checkbox" class="sw" id="mdFeatureEnabled" />
+            </label>
           </div>
-          <div class="topic-form-row">
-            <div class="field field-grow">
-              <span class="field-label" id="newTopicDescLabel"></span>
-              <input type="text" id="newTopicDesc" />
+          <h2 id="mdHeading" class="visually-hidden"></h2>
+          <section class="sec">
+            <h2 id="vaultHeading"></h2>
+            <div class="card">
+              <div class="row row-path">
+                <input type="text" id="vaultPath" readonly />
+                <button id="btnChooseVault" class="btn-light"></button>
+              </div>
             </div>
-            <div class="field field-grow">
-              <span class="field-label" id="newTopicDefaultTitleLabel"></span>
-              <input type="text" id="newTopicDefaultTitle" />
+          </section>
+          <section class="sec">
+            <h2 id="exportGroupHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="postSaveHeading"></b><small class="hint" id="postSaveHint"></small></span>
+                <span class="ctrl seg">
+                  <label><input type="radio" name="postSave" value="keep" id="postSaveKeep" /><span><span class="status-dot dot-green"></span> <span id="postSaveKeepLabel"></span></span></label>
+                  <label><input type="radio" name="postSave" value="delete" id="postSaveDelete" /><span><span class="status-dot dot-red"></span> <span id="postSaveDeleteLabel"></span></span></label>
+                </span>
+              </div>
+              <label class="row">
+                <span class="lab"><b id="autoExportLabel"></b><small class="hint" id="autoExportHint"></small></span>
+                <input type="checkbox" class="sw" id="ruleAutoExport" />
+              </label>
+              <h3 id="exportModeHeading" class="visually-hidden"></h3>
             </div>
-          </div>
-          <div class="topic-form-row">
-            <label class="check-row"><input type="checkbox" id="newTopicSkipTitle" /> <span id="newTopicSkipTitleLabel"></span></label>
-          </div>
-          <div class="topic-form-row">
-            <label class="check-row"><input type="checkbox" id="newTopicUseCalendar" checked /> <span id="newTopicUseCalendarLabel"></span></label>
-          </div>
-          <div class="topic-form-row topic-form-row-appearance">
-            <div class="field">
-              <span class="field-label" id="newTopicCharLabel"></span>
-              <input type="text" id="newTopicChar" maxlength="2" class="char-input" />
+          </section>
+          <section class="sec">
+            <h2 id="ruleHeading"></h2>
+            <div class="card">
+              <div class="row row-stack">
+                <small class="hint" id="ruleHint1"></small>
+                <small class="hint" id="ruleHint2"></small>
+              </div>
+              <label class="row"><span class="lab"><b id="includeTopicLabel"></b></span><input type="checkbox" class="sw" id="ruleIncludeTopic" /></label>
+              <label class="row"><span class="lab"><b id="includeTitleLabel"></b></span><input type="checkbox" class="sw" id="ruleIncludeTitle" /></label>
+              <label class="row"><span class="lab"><b id="includeDateLabel"></b></span><input type="checkbox" class="sw" id="ruleIncludeDate" /></label>
+              <label class="row"><span class="lab"><b id="includeSeqLabel"></b></span><input type="checkbox" class="sw" id="ruleIncludeSeq" /></label>
+              <div class="row">
+                <span class="lab"><b id="separatorLabel"></b></span>
+                <span class="ctrl">
+                  <select id="ruleSeparator">
+                    <option value="_" id="separatorUnderscore"></option>
+                    <option value="-" id="separatorHyphen"></option>
+                    <option value=" " id="separatorSpace"></option>
+                  </select>
+                </span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="exampleLabel"></b></span>
+                <span class="ctrl"><span id="ruleExample" class="example-box"></span></span>
+              </div>
             </div>
-            <div class="field-color-group">
-              <span class="color-copy-pair">
-                <label class="mini-label"><span id="newTopicColorLabel"></span> <input type="color" id="newTopicColor" value="#8A8574" /></label>
-                <button type="button" class="copy-color-btn" data-copy-for="newTopicColor"></button>
-                <button type="button" class="paste-color-btn" data-paste-for="newTopicColor"></button>
+          </section>
+        </div>
+
+        <!-- ───── 저장·백업 ───── -->
+        <div class="tab-panel" data-panel="backup">
+          <h1 class="panel-title" data-title-for="backup"></h1>
+          <section class="sec">
+            <h2 id="autoBackupHeading"></h2>
+            <div class="card">
+              <label class="row">
+                <span class="lab"><b id="autoBackupEnabledLabel"></b><small class="hint" id="autoBackupHint"></small></span>
+                <input type="checkbox" class="sw" id="autoBackupEnabled" />
+              </label>
+              <div class="row row-path">
+                <input type="text" id="autoBackupFolder" readonly />
+                <button id="btnChooseBackupFolder" type="button" class="btn-light"></button>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="intervalLabel"></b></span>
+                <span class="ctrl">
+                  <select id="autoBackupInterval">
+                    <option value="24" id="intervalDaily"></option>
+                    <option value="12" id="interval12h"></option>
+                    <option value="6" id="interval6h"></option>
+                    <option value="0" id="intervalEveryLaunch"></option>
+                  </select>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="backupHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="exportAllRowLabel"></b><small class="hint" id="backupHint1"></small><small class="hint" id="backupHint2"></small><small class="hint status-line" id="exportAllStatus"></small></span>
+                <span class="ctrl"><button id="btnExportAll" type="button" class="btn-light"></button></span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="restoreRowLabel"></b><small class="hint" id="backupHint3"></small><small class="hint status-line" id="restoreStatus"></small></span>
+                <span class="ctrl"><button id="btnRestoreBackup" type="button" class="btn-light"></button></span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="storageHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><small class="hint" id="storageHint"></small><small class="hint status-line" id="sweepStatus"></small></span>
+                <span class="ctrl"><button id="btnSweepAttachments" type="button" class="btn-light"></button></span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ───── 단축키 ───── -->
+        <div class="tab-panel" data-panel="shortcut">
+          <h1 class="panel-title" data-title-for="shortcut"></h1>
+          <h2 id="shortcutHeading" class="visually-hidden"></h2>
+          <div class="card">
+            <div class="row">
+              <span class="lab"><b id="shortcutRowLabel"></b><small class="hint" id="shortcutHint"></small></span>
+              <span class="ctrl">
+                <input type="text" id="newMemoShortcutInput" readonly class="shortcut-input" />
+                <button id="btnClearShortcut" type="button" class="btn-light"></button>
               </span>
-              <span class="color-copy-pair">
-                <label class="mini-label"><span id="newTopicTextColorLabel"></span> <input type="color" id="newTopicTextColor" value="#FFFFFF" /></label>
-                <button type="button" class="copy-color-btn" data-copy-for="newTopicTextColor"></button>
-                <button type="button" class="paste-color-btn" data-paste-for="newTopicTextColor"></button>
-              </span>
-              <span class="color-copy-pair">
-                <label class="mini-label"><span id="newTopicMemoColorLabel"></span> <input type="color" id="newTopicMemoColor" value="#8A8574" /></label>
-                <button type="button" class="copy-color-btn" data-copy-for="newTopicMemoColor"></button>
-                <button type="button" class="paste-color-btn" data-paste-for="newTopicMemoColor"></button>
-              </span>
             </div>
           </div>
-          <p class="hint hint-error" id="topicNameError" hidden></p>
-          <div class="topic-form-row topic-form-row-submit">
-            <button id="btnAddTopic"></button>
+        </div>
+
+        <!-- ───── 휴지통 ───── -->
+        <div class="tab-panel" data-panel="trash">
+          <h1 class="panel-title" data-title-for="trash"></h1>
+          <h2 id="trashHeading" class="visually-hidden"></h2>
+          <p class="hint panel-hint" id="trashHint"></p>
+          <div id="trashList" class="trash-list"></div>
+          <div class="trash-actions">
+            <button id="btnEmptyTrash" type="button" class="danger-btn"></button>
           </div>
         </div>
-      </section>
-    </div>
 
-    <div class="tab-panel" data-panel="general">
-      <section>
-        <h2 id="generalHeading"></h2>
-        <label class="check-row"><input type="checkbox" id="autoLaunch" /> <span id="autoLaunchLabel"></span></label>
-        <p class="hint" id="autoLaunchDevHint" hidden></p>
-        <label class="check-row"><input type="checkbox" id="multiMode" /> <span id="multiModeLabel"></span></label>
-        <label class="check-row"><input type="checkbox" id="confirmMemoDelete" /> <span id="confirmMemoDeleteLabel"></span></label>
-      </section>
-
-      <section>
-        <h2 id="shortcutHeading"></h2>
-        <p class="hint" id="shortcutHint"></p>
-        <div class="row">
-          <input type="text" id="newMemoShortcutInput" readonly style="flex:1;" />
-          <button id="btnClearShortcut" type="button"></button>
-        </div>
-      </section>
-
-      <section>
-        <h2 id="opacityHeading"></h2>
-        <p class="hint" id="opacityHint"></p>
-        <div class="row">
-          <input type="range" id="opacityRange" min="10" max="100" step="5" style="flex:1;" />
-          <span id="opacityValue" style="width:40px;text-align:right;">100%</span>
-        </div>
-      </section>
-
-      <section>
-        <h2 id="fontHeading"></h2>
-        <p class="hint" id="fontHint"></p>
-        <div class="row">
-          <select id="fontFamily" style="flex:1;"></select>
-        </div>
-        <div class="row" id="fontCustomRow" hidden>
-          <input type="text" id="fontFamilyCustom" style="flex:1;" />
-        </div>
-        <p class="hint" id="fontCustomHint" hidden></p>
-        <div id="fontPreview" class="font-preview"></div>
-      </section>
-
-      <!-- 달력·가계부 설정은 달력창의 ⚙️ 버튼으로 이동함(태훈님 요청 2026-07-24) -->
-
-      <section>
-        <h2 id="backupHeading"></h2>
-        <p class="hint" id="backupHint1"></p>
-        <div class="row">
-          <button id="btnExportAll" type="button"></button>
-          <span id="exportAllStatus" class="hint"></span>
-        </div>
-        <p class="hint" id="backupHint2"></p>
-        <div class="row">
-          <button id="btnRestoreBackup" type="button" style="background:#6B6551;"></button>
-          <span id="restoreStatus" class="hint"></span>
-        </div>
-        <p class="hint" id="backupHint3"></p>
-      </section>
-
-      <section>
-        <h2 id="storageHeading"></h2>
-        <p class="hint" id="storageHint"></p>
-        <div class="row">
-          <button id="btnSweepAttachments" type="button"></button>
-          <span id="sweepStatus" class="hint"></span>
-        </div>
-      </section>
-
-      <section>
-        <h2 id="autoBackupHeading"></h2>
-        <p class="hint" id="autoBackupHint"></p>
-        <label class="check-row"><input type="checkbox" id="autoBackupEnabled" /> <span id="autoBackupEnabledLabel"></span></label>
-        <div class="row">
-          <input type="text" id="autoBackupFolder" readonly />
-          <button id="btnChooseBackupFolder" type="button"></button>
-        </div>
-        <div class="row">
-          <label><span id="intervalLabel"></span>
-            <select id="autoBackupInterval">
-              <option value="24" id="intervalDaily"></option>
-              <option value="12" id="interval12h"></option>
-              <option value="6" id="interval6h"></option>
-              <option value="0" id="intervalEveryLaunch"></option>
-            </select>
-          </label>
-        </div>
-      </section>
-    </div>
-
-    <div class="tab-panel" data-panel="widget">
-      <section>
-        <h2 id="widgetTabHeading"></h2>
-
-        <p class="subgroup-label" id="widgetColorGroupLabel"></p>
-        <div class="row">
-          <label class="mini-label"><span id="widgetTitlebarColorLabel"></span> <input type="color" id="widgetTitlebarColor" /></label>
-        </div>
-
-        <p class="subgroup-label with-divider" id="widgetSizeGroupLabel"></p>
-        <label class="check-row"><input type="checkbox" id="widgetAutoResize" /> <span id="widgetAutoResizeLabel"></span></label>
-        <div class="row">
-          <label><span id="widgetWidthLabel"></span> <input type="number" id="widgetWidth" min="180" max="600" /></label>
-          <label><span id="widgetHeightLabel"></span> <input type="number" id="widgetHeight" min="200" max="900" /></label>
-        </div>
-
-        <p class="subgroup-label with-divider" id="widgetHandlePositionGroupLabel"></p>
-        <label class="check-row"><input type="radio" name="handlePosition" value="left" id="handlePositionLeft" /> <span id="handlePositionLeftLabel"></span></label>
-        <label class="check-row"><input type="radio" name="handlePosition" value="right" id="handlePositionRight" /> <span id="handlePositionRightLabel"></span></label>
-        <p class="hint" id="handlePositionHint"></p>
-
-        <p class="subgroup-label with-divider" id="widgetGestureGroupLabel"></p>
-        <div class="row">
-          <label><span id="widgetSingleClickLabel"></span>
-            <select id="gestureSingle"></select>
-          </label>
-          <label><span id="widgetDoubleClickLabel"></span>
-            <select id="gestureDouble"></select>
-          </label>
-        </div>
-        <p class="hint" id="widgetGestureHint"></p>
-      </section>
-    </div>
-
-    <div class="tab-panel" data-panel="md">
-      <section>
-        <h2 id="mdHeading"></h2>
-        <label class="check-row"><input type="checkbox" id="mdFeatureEnabled" /> <span id="mdFeatureLabel"></span></label>
-        <p class="hint" id="mdFeatureHint"></p>
-      </section>
-
-      <section>
-        <h2 id="vaultHeading"></h2>
-        <div class="row">
-          <input type="text" id="vaultPath" readonly />
-          <button id="btnChooseVault"></button>
-        </div>
-      </section>
-
-      <section>
-        <h2 id="postSaveHeading"></h2>
-        <label class="check-row"><input type="radio" name="postSave" value="keep" id="postSaveKeep" /> <span class="status-dot dot-green"></span> <span id="postSaveKeepLabel"></span></label>
-        <label class="check-row"><input type="radio" name="postSave" value="delete" id="postSaveDelete" /> <span class="status-dot dot-red"></span> <span id="postSaveDeleteLabel"></span></label>
-        <p class="hint" id="postSaveHint"></p>
-      </section>
-
-      <section>
-        <h2 id="exportModeHeading"></h2>
-        <label class="check-row"><input type="checkbox" id="ruleAutoExport" /> <span id="autoExportLabel"></span></label>
-        <p class="hint" id="autoExportHint"></p>
-      </section>
-
-      <section>
-        <h2 id="ruleHeading"></h2>
-        <p class="hint" id="ruleHint1"></p>
-        <p class="hint" id="ruleHint2"></p>
-        <label class="check-row"><input type="checkbox" id="ruleIncludeTopic" /> <span id="includeTopicLabel"></span></label>
-        <label class="check-row"><input type="checkbox" id="ruleIncludeTitle" /> <span id="includeTitleLabel"></span></label>
-        <label class="check-row"><input type="checkbox" id="ruleIncludeDate" /> <span id="includeDateLabel"></span></label>
-        <label class="check-row"><input type="checkbox" id="ruleIncludeSeq" /> <span id="includeSeqLabel"></span></label>
-        <div class="row">
-          <label><span id="separatorLabel"></span>
-            <select id="ruleSeparator">
-              <option value="_" id="separatorUnderscore"></option>
-              <option value="-" id="separatorHyphen"></option>
-              <option value=" " id="separatorSpace"></option>
-            </select>
-          </label>
-        </div>
-        <p class="hint"><span id="exampleLabel"></span> <span id="ruleExample"></span></p>
-      </section>
-    </div>
-
-    <div class="tab-panel" data-panel="edit">
-      <section>
-        <h2 id="editHeading"></h2>
-        <p class="hint" id="editHint"></p>
-        <div class="row">
-          <label><span id="countLabel"></span> <input type="number" id="specialCharCount" min="0" max="20" style="width:60px;" /></label>
-        </div>
-        <div id="specialCharInputs" class="special-char-inputs"></div>
-      </section>
-      <section>
-        <h2 id="refHeading"></h2>
-        <p class="hint" id="refHint"></p>
-        <div class="special-char-reference">
-          <div class="special-char-ref-group">
-            <span class="special-char-ref-label" id="refShapes"></span>
-            <span class="special-char-ref-chars">● ○ ■ □ ▲ △ ▼ ▽ ◆ ◇ ★ ☆</span>
-          </div>
-          <div class="special-char-ref-group">
-            <span class="special-char-ref-label" id="refArrows"></span>
-            <span class="special-char-ref-chars">→ ← ↑ ↓ ↔ ↕ ⇒ ⇐ ⇔</span>
-          </div>
-          <div class="special-char-ref-group">
-            <span class="special-char-ref-label" id="refPunctuation"></span>
-            <span class="special-char-ref-chars">※ ‰ ℃ § ¶ † ‡ • ◎</span>
-          </div>
-          <div class="special-char-ref-group">
-            <span class="special-char-ref-label" id="refBrackets"></span>
-            <span class="special-char-ref-chars">「」『』〈〉《》【】〔〕</span>
-          </div>
-          <div class="special-char-ref-group">
-            <span class="special-char-ref-label" id="refMath"></span>
-            <span class="special-char-ref-chars">± × ÷ ≠ ≤ ≥ ∞ √</span>
-          </div>
-          <div class="special-char-ref-group">
-            <span class="special-char-ref-label" id="refNumbers"></span>
-            <span class="special-char-ref-chars">① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ</span>
+        <!-- ───── 도움말 ───── -->
+        <!-- (0.23.0) 예전엔 설명서 전체를 iframe으로 여기 끼워 넣었는데, 설명서도 왼쪽 메뉴 구조가 돼서
+             좁은 칸에 겹메뉴가 생김 → 버튼으로 별도 "사용 설명서" 창을 엶 -->
+        <div class="tab-panel" data-panel="help">
+          <h1 class="panel-title" data-title-for="help"></h1>
+          <div class="card">
+            <div class="row">
+              <span class="lab"><b>사용 설명서</b><small class="hint">위젯·메모창·달력·가계부·설정 사용법을 그림과 함께 봐요</small></span>
+              <span class="ctrl"><button type="button" class="btn-light" data-help-page="start">열기</button></span>
+            </div>
+            <div class="row">
+              <span class="lab"><b>자주 묻는 질문</b><small class="hint">창이 안 보일 때, 눌러도 반응이 없을 때 등</small></span>
+              <span class="ctrl"><button type="button" class="btn-light" data-help-page="faq">열기</button></span>
+            </div>
+            <div class="row">
+              <span class="lab"><b>설정 설명</b><small class="hint">메모 설정·달력 설정의 각 메뉴가 하는 일</small></span>
+              <span class="ctrl"><button type="button" class="btn-light" data-help-page="settings">열기</button></span>
+            </div>
           </div>
         </div>
-      </section>
-    </div>
 
-    <div class="tab-panel" data-panel="trash">
-      <section>
-        <h2 id="trashHeading"></h2>
-        <p class="hint" id="trashHint"></p>
-        <div id="trashList" class="trash-list"></div>
-        <div class="trash-actions">
-          <button id="btnEmptyTrash" type="button" class="danger-btn"></button>
-        </div>
-      </section>
-    </div>
+      </div>
 
-    <div class="tab-panel" data-panel="help">
-      <iframe class="help-frame" src="../help/index.html"></iframe>
-    </div>
-
-    <div class="save-bar">
-      <span id="saveStatus"></span>
-      <span id="appVersionLabel" class="app-version-label"></span>
-      <button id="btnCancel" class="save-btn cancel-btn"></button>
-      <button id="btnApply" class="save-btn apply-btn"></button>
-      <button id="btnSave" class="save-btn"></button>
+      <div class="save-bar">
+        <span id="appVersionLabel" class="app-version-label"></span>
+        <span id="saveStatus"></span>
+        <button id="btnCancel" class="save-btn cancel-btn"></button>
+        <button id="btnApply" class="save-btn apply-btn"></button>
+        <button id="btnSave" class="save-btn"></button>
+      </div>
     </div>
   </div>
 

@@ -89,9 +89,11 @@ const els = {
   confirmModalConfirm: document.getElementById('confirmModalConfirm'),
   imageAnnotateModal: document.getElementById('imageAnnotateModal'),
   annotateCanvas: document.getElementById('annotateCanvas'),
+  annotateToolPen: document.getElementById('annotateToolPen'),
   annotateToolLine: document.getElementById('annotateToolLine'),
   annotateToolArrow: document.getElementById('annotateToolArrow'),
   annotateToolNumber: document.getElementById('annotateToolNumber'),
+  annotateToolEraser: document.getElementById('annotateToolEraser'),
   annotateColorSwatches: document.querySelectorAll('.annotate-color-swatch'),
   annotateUndo: document.getElementById('annotateUndo'),
   imageAnnotateHint: document.getElementById('imageAnnotateHint'),
@@ -197,9 +199,11 @@ function applyLang() {
   els.tableModalPaste.textContent = M.tableModalPasteButton;
   els.tableModalCancel.textContent = M.common.cancel;
 
+  els.annotateToolPen.textContent = M.imageAnnotateToolPen;
   els.annotateToolLine.textContent = M.imageAnnotateToolLine;
   els.annotateToolArrow.textContent = M.imageAnnotateToolArrow;
   els.annotateToolNumber.textContent = M.imageAnnotateToolNumber;
+  els.annotateToolEraser.textContent = M.imageAnnotateToolEraser;
   els.annotateColorSwatches.forEach((btn) => (btn.title = M.imageAnnotateColorTitle));
   els.annotateUndo.textContent = M.imageAnnotateUndoButton;
   els.imageAnnotateHint.textContent = M.imageAnnotateHint;
@@ -272,6 +276,7 @@ window.api.onMemoInit(async (initMemo) => {
   autoExportObsidian = !!s.autoExportObsidian;
   mdFeatureEnabled = s.mdFeatureEnabled !== false;
   hasSeenImageResizeNotice = !!s.hasSeenImageResizeNotice;
+  applyImageMaxHeight(s);
   applyMdFeatureState();
   renderSpecialChars(s.specialChars);
 
@@ -764,13 +769,26 @@ els.editorArea.addEventListener('drop', async (e) => {
 
 // ---- 서식 툴바 (마크다운 삽입 방식) ----
 
+// 여러 줄을 선택한 경우 줄마다 따로 감쌈 (빈 줄은 건너뜀)
+// — 인라인 서식(**, *, ~~ 등)은 한 줄 안에서만 인식되기 때문에
+//   `**첫줄\n둘째줄**` 처럼 통째로 감싸면 서식이 적용되지 않았음 (2026-09-11 수정)
+function wrapEachLine(text, before, after) {
+  return text
+    .split('\n')
+    .map((line) => (line.trim() === '' ? line : before + line + after))
+    .join('\n');
+}
+
 function wrapSelection(before, after) {
   const ta = els.content;
   const start = ta.selectionStart;
   const end = ta.selectionEnd;
   const selected = ta.value.slice(start, end);
   ta.focus();
-  ta.setRangeText(before + selected + after, start, end, 'end');
+  const wrapped = selected.includes('\n')
+    ? wrapEachLine(selected, before, after)
+    : before + selected + after;
+  ta.setRangeText(wrapped, start, end, 'end');
   scheduleSave();
 }
 
@@ -794,6 +812,20 @@ function toggleWrapSelection(marker) {
   if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2) {
     const inner = selected.slice(marker.length, selected.length - marker.length);
     ta.setRangeText(inner, start, end, 'end');
+    scheduleSave();
+    return;
+  }
+  // 여러 줄 선택: 모든 줄이 이미 감싸져 있으면 전부 벗기고, 아니면 줄마다 감쌈
+  if (selected.includes('\n')) {
+    const lines = selected.split('\n');
+    const filled = lines.filter((l) => l.trim() !== '');
+    const allWrapped = filled.length > 0 && filled.every(
+      (l) => l.startsWith(marker) && l.endsWith(marker) && l.length >= marker.length * 2
+    );
+    const out = allWrapped
+      ? lines.map((l) => (l.trim() === '' ? l : l.slice(marker.length, l.length - marker.length))).join('\n')
+      : wrapEachLine(selected, marker, marker);
+    ta.setRangeText(out, start, end, 'end');
     scheduleSave();
     return;
   }
@@ -1348,6 +1380,8 @@ let annotateStrokes = []; // 이번에 그린 도형들(선/화살표/번호) - 
 let annotateTool = 'line';
 let annotateColor = '#ff3b30';
 let annotateNumberNext = 1;
+// 되돌리기용 기록: 바꾸기 직전의 상태(도형 목록 + 다음 번호)를 쌓아둠. 지우개로 지운 것도 이걸로 되살아남
+let annotateHistory = [];
 
 function attachmentExt(storedName) {
   const i = storedName.lastIndexOf('.');
@@ -1363,6 +1397,7 @@ function openImageAnnotator(a, imgEl) {
   annotateTarget = a;
   annotateBaseImg = imgEl;
   annotateStrokes = [];
+  annotateHistory = [];
   annotateNumberNext = 1;
   annotateTool = 'line';
   annotateColor = '#ff3b30';
@@ -1375,6 +1410,8 @@ function openImageAnnotator(a, imgEl) {
   redrawAnnotateCanvas();
 
   els.imageAnnotateModal.hidden = false;
+  // 뒤쪽 메모 본문에 커서가 남아 있으면 Ctrl+Z가 본문 글자를 되돌릴 수 있어서 커서를 빼둠
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 }
 
 function closeImageAnnotator() {
@@ -1382,6 +1419,7 @@ function closeImageAnnotator() {
   annotateTarget = null;
   annotateBaseImg = null;
   annotateStrokes = [];
+  annotateHistory = [];
 }
 
 function redrawAnnotateCanvas() {
@@ -1448,8 +1486,38 @@ function drawAnnotateNumber(ctx, x, y, n, color) {
   ctx.restore();
 }
 
+// 펜(자유곡선): 찍힌 점들을 부드럽게 이어 그림. 점이 하나뿐이면(클릭만 함) 동그란 점 하나
+function drawAnnotatePen(ctx, pts, color) {
+  if (!pts || pts.length === 0) return;
+  const lw = annotateLineWidth(ctx.canvas.width);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, lw / 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2;
+      const my = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    const last = pts[pts.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawAnnotateStroke(ctx, s) {
-  if (s.type === 'line') drawAnnotateLine(ctx, s.x1, s.y1, s.x2, s.y2, s.color);
+  if (s.type === 'pen') drawAnnotatePen(ctx, s.points, s.color);
+  else if (s.type === 'line') drawAnnotateLine(ctx, s.x1, s.y1, s.x2, s.y2, s.color);
   else if (s.type === 'arrow') drawAnnotateArrow(ctx, s.x1, s.y1, s.x2, s.y2, s.color);
   else if (s.type === 'number') drawAnnotateNumber(ctx, s.x, s.y, s.n, s.color);
 }
@@ -1465,8 +1533,48 @@ function annotateCanvasPoint(e) {
   };
 }
 
+// 지우개 판정용: 점 p에서 선분(a-b)까지의 거리
+function annotateDistToSegment(p, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((p.x - ax) * dx + (p.y - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (ax + t * dx), p.y - (ay + t * dy));
+}
+
+// 지우개가 이 도형에 닿았는지(닿으면 그 도형을 통째로 지움)
+function annotateStrokeHit(s, p, tol) {
+  if (s.type === 'number') {
+    const r = Math.max(14, Math.round(els.annotateCanvas.width / 40));
+    return Math.hypot(p.x - s.x, p.y - s.y) <= r + tol;
+  }
+  if (s.type === 'line' || s.type === 'arrow') return annotateDistToSegment(p, s.x1, s.y1, s.x2, s.y2) <= tol;
+  if (s.type === 'pen') {
+    const pts = s.points || [];
+    if (pts.length === 1) return Math.hypot(p.x - pts[0].x, p.y - pts[0].y) <= tol;
+    for (let i = 1; i < pts.length; i++) {
+      if (annotateDistToSegment(p, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) <= tol) return true;
+    }
+  }
+  return false;
+}
+
+function pushAnnotateHistory() {
+  annotateHistory.push({ strokes: annotateStrokes.slice(), next: annotateNumberNext });
+}
+
+// 되돌리기 한 번: 마지막으로 바꾸기 직전 상태로 돌아감(그린 것은 사라지고, 지운 것은 되살아남)
+function annotateUndoOnce() {
+  const h = annotateHistory.pop();
+  if (!h) return;
+  annotateStrokes = h.strokes;
+  annotateNumberNext = h.next;
+  redrawAnnotateCanvas();
+}
+
 function updateAnnotateToolButtons() {
-  [els.annotateToolLine, els.annotateToolArrow, els.annotateToolNumber].forEach((btn) => {
+  els.annotateCanvas.classList.toggle('erasing', annotateTool === 'eraser');
+  [els.annotateToolPen, els.annotateToolLine, els.annotateToolArrow, els.annotateToolNumber, els.annotateToolEraser].forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tool === annotateTool);
   });
 }
@@ -1477,7 +1585,7 @@ function updateAnnotateColorButtons() {
   });
 }
 
-[els.annotateToolLine, els.annotateToolArrow, els.annotateToolNumber].forEach((btn) => {
+[els.annotateToolPen, els.annotateToolLine, els.annotateToolArrow, els.annotateToolNumber, els.annotateToolEraser].forEach((btn) => {
   btn.addEventListener('click', () => {
     annotateTool = btn.dataset.tool;
     updateAnnotateToolButtons();
@@ -1493,13 +1601,17 @@ els.annotateColorSwatches.forEach((btn) => {
 
 // 되돌리기: 마지막으로 그린 도형 하나만 지움(캔버스를 처음부터 다시 그려서 구현 — 그래서 항상 정확함).
 // 방금 지운 게 마지막 번호였으면, 다음 번호도 한 칸 되돌려서 번호가 다시 이어지게 함
-els.annotateUndo.addEventListener('click', () => {
-  const last = annotateStrokes[annotateStrokes.length - 1];
-  if (!last) return;
-  if (last.type === 'number' && last.n === annotateNumberNext - 1) annotateNumberNext -= 1;
-  annotateStrokes.pop();
-  redrawAnnotateCanvas();
-});
+els.annotateUndo.addEventListener('click', annotateUndoOnce);
+
+// 그림그리기 창이 열려 있을 때 Ctrl+Z = 되돌리기. 뒤쪽 메모 본문까지 전달되지 않게 여기서 막음
+document.addEventListener('keydown', (e) => {
+  if (els.imageAnnotateModal.hidden) return;
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault();
+    e.stopPropagation();
+    annotateUndoOnce();
+  }
+}, true);
 
 // 번호 도구는 클릭 한 번으로 바로 찍히고(누를 때마다 다음 숫자), 선/화살표는 눌러서 끈 채
 // 움직이는 동안 미리보기를 보여주다가 손을 떼는 순간 확정됨
@@ -1509,9 +1621,58 @@ els.annotateCanvas.addEventListener('mousedown', (e) => {
   const start = annotateCanvasPoint(e);
 
   if (annotateTool === 'number') {
+    pushAnnotateHistory();
     annotateStrokes.push({ type: 'number', x: start.x, y: start.y, n: annotateNumberNext, color: annotateColor });
     annotateNumberNext += 1;
     redrawAnnotateCanvas();
+    return;
+  }
+
+  // 지우개: 누른 채 문지르는 동안 닿는 도형을 통째로 지움. 한 번 문지른 것 = 되돌리기 한 번
+  if (annotateTool === 'eraser') {
+    const cvs = els.annotateCanvas;
+    const scale = cvs.width / cvs.getBoundingClientRect().width; // 화면 10px 정도 범위로 판정
+    const tol = annotateLineWidth(cvs.width) / 2 + 10 * scale;
+    let saved = false;
+    const eraseAt = (p) => {
+      const keep = annotateStrokes.filter((st) => !annotateStrokeHit(st, p, tol));
+      if (keep.length === annotateStrokes.length) return;
+      if (!saved) { pushAnnotateHistory(); saved = true; }
+      annotateStrokes = keep;
+      redrawAnnotateCanvas();
+    };
+    eraseAt(start);
+    const onEraseMove = (ev) => eraseAt(annotateCanvasPoint(ev));
+    const onEraseUp = () => {
+      document.removeEventListener('mousemove', onEraseMove);
+      document.removeEventListener('mouseup', onEraseUp);
+    };
+    document.addEventListener('mousemove', onEraseMove);
+    document.addEventListener('mouseup', onEraseUp);
+    return;
+  }
+
+  // 펜: 움직이는 대로 점을 모아 이어 그림. 그리는 중엔 새 조각만 덧그려서 큰 그림에서도 버벅이지 않게 함
+  if (annotateTool === 'pen') {
+    const pts = [start];
+    const ctx = els.annotateCanvas.getContext('2d');
+    drawAnnotatePen(ctx, pts, annotateColor);
+    const onPenMove = (ev) => {
+      const cur = annotateCanvasPoint(ev);
+      const prev = pts[pts.length - 1];
+      if (Math.hypot(cur.x - prev.x, cur.y - prev.y) < 1.5) return;
+      pts.push(cur);
+      drawAnnotatePen(ctx, [prev, cur], annotateColor);
+    };
+    const onPenUp = () => {
+      document.removeEventListener('mousemove', onPenMove);
+      document.removeEventListener('mouseup', onPenUp);
+      pushAnnotateHistory();
+      annotateStrokes.push({ type: 'pen', points: pts, color: annotateColor });
+      redrawAnnotateCanvas();
+    };
+    document.addEventListener('mousemove', onPenMove);
+    document.addEventListener('mouseup', onPenUp);
     return;
   }
 
@@ -1527,6 +1688,7 @@ els.annotateCanvas.addEventListener('mousedown', (e) => {
     document.removeEventListener('mouseup', onUp);
     const end = annotateCanvasPoint(ev);
     if (Math.hypot(end.x - start.x, end.y - start.y) < 4) { redrawAnnotateCanvas(); return; } // 거의 제자리(클릭 실수)면 무시
+    pushAnnotateHistory();
     annotateStrokes.push({ type: annotateTool, x1: start.x, y1: start.y, x2: end.x, y2: end.y, color: annotateColor });
     redrawAnnotateCanvas();
   }
@@ -1571,9 +1733,44 @@ window.api.onSettingsUpdated(async () => {
   autoExportObsidian = !!s.autoExportObsidian;
   mdFeatureEnabled = s.mdFeatureEnabled !== false;
   hasSeenImageResizeNotice = !!s.hasSeenImageResizeNotice;
+  applyImageMaxHeight(s);
   applyMdFeatureState();
   renderSpecialChars(s.specialChars);
 });
+
+// (0.23.0) 큰 그림을 넣을 때 메모 본문 칸 안에 다 보이게 줄일 기준 = 본문 칸 높이의 N%
+// (settings.json memoImageMaxHeightPercent, 10~100, 기본 70). 값이 이상하면 70
+let imageMaxHeightPct = 70;
+function applyImageMaxHeight(s) {
+  const p = Number(s && s.memoImageMaxHeightPercent);
+  imageMaxHeightPct = Number.isFinite(p) && p >= 10 && p <= 100 ? p : 70;
+}
+
+// (0.23.0) 방금 넣은 그림이 본문 칸보다 크면, 칸 안에 다 보이는 폭을 계산해서 "![[이름|폭]]"으로 저장.
+// 넣는 순간에만 함 — 그다음은 메모 크기를 바꿔도 그림은 그대로(손잡이로만 바꿈. 태훈님 2026-10-09)
+function fitNewImage(name) {
+  const p = imagePaths.get(name);
+  const box = document.getElementById('content');
+  if (!p || !box || !els.content || !els.content.setImageWidth) return;
+  const probe = new Image();
+  probe.onload = () => {
+    const nw = probe.naturalWidth;
+    const nh = probe.naturalHeight;
+    if (!nw || !nh) return;
+    // 본문 칸의 실제 글 폭(좌우 여백 뺀 값) — 이보다 크게 저장하면 화면에선 줄어 보여도 메모를 키울 때 커져 보임
+    const cs = getComputedStyle(box);
+    const innerW = box.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    const maxW = Math.max(60, innerW - 8);
+    const maxH = Math.max(80, box.clientHeight * imageMaxHeightPct / 100);
+    const w = Math.floor(Math.min(nw, maxW, maxH * nw / nh));
+    if (w >= nw) return; // 원래 크기로 충분히 들어가면 그대로(폭을 안 붙임)
+    if (els.content.setImageWidth(name, Math.max(40, w))) {
+      memo.content = els.content.value;
+      scheduleSave();
+    }
+  };
+  probe.src = `file://${p}`;
+}
 
 // MD/옵시디언 관련 UI(서식버튼, 메모연결, MD내보내기, 처리방식버튼)를 통째로 켜고 끔.
 // 꺼지면 자리를 비우지 않고 display:none으로 없애서 남은 버튼들이 자동으로 당겨붙음(memo.css 참고)
@@ -1697,6 +1894,7 @@ function insertImageAtCursor(attachment) {
   memo.content = els.content.value;
   bodyImages.add(attachment.storedName);
   scheduleSave();
+  fitNewImage(attachment.storedName);
 }
 
 function renderFileChip(a) {
