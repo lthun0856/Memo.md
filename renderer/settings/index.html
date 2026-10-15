@@ -15,6 +15,7 @@
       <button type="button" class="tab-btn" data-tab="general"><span class="ic">⚙</span><span class="tab-text" id="tabBtnGeneral"></span></button>
       <button type="button" class="tab-btn" data-tab="look"><span class="ic ic-sm">Aa</span><span class="tab-text" id="tabBtnLook"></span></button>
       <button type="button" class="tab-btn" data-tab="widget"><span class="ic">▤</span><span class="tab-text" id="tabBtnWidget"></span></button>
+      <button type="button" class="tab-btn" data-tab="box"><span class="ic">▣</span><span class="tab-text" id="tabBtnBox"></span></button>
       <div class="side-grp" id="sideGroupMemo"></div>
       <button type="button" class="tab-btn" data-tab="topics"><span class="ic">#</span><span class="tab-text" id="tabBtnTopics"></span></button>
       <button type="button" class="tab-btn" data-tab="edit"><span class="ic">✎</span><span class="tab-text" id="tabBtnEdit"></span></button>
@@ -421,6 +422,79 @@
           </div>
         </div>
 
+        <!-- ───── 바탕화면 정리 (2026-10-13) — settingsBox.js 가 다룸, 바로 적용(아래 저장 버튼과 무관) ───── -->
+        <div class="tab-panel" data-panel="box">
+          <h1 class="panel-title" data-title-for="box"></h1>
+          <p class="hint panel-hint" id="boxPanelHint"></p>
+          <!-- (4차) 공통 스타일 — 모든 정리함이 같이 씀 -->
+          <section class="sec">
+            <h2 id="boxStyleHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="boxStyleBarLabel"></b></span>
+                <span class="ctrl"><input type="color" id="boxStyleBar" class="box-color" /></span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="boxStyleBgLabel"></b></span>
+                <span class="ctrl"><input type="color" id="boxStyleBg" class="box-color" /></span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="boxStyleTrLabel"></b><small class="hint" id="boxStyleTrHint"></small></span>
+                <span class="ctrl range">
+                  <input type="range" id="boxStyleTr" min="0" max="100" step="5" />
+                  <span id="boxStyleTrVal" class="range-val"></span>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="boxNewHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="boxNewLabel"></b><small class="hint" id="boxNewHint"></small><small class="hint hint-error" id="boxNewError" hidden></small></span>
+                <span class="ctrl box-new-ctrl">
+                  <input type="text" id="boxNewName" maxlength="60" />
+                  <button id="btnBoxCreate" type="button" class="btn-light"></button>
+                </span>
+              </div>
+              <div class="row">
+                <span class="lab"><b id="boxLinkLabel"></b><small class="hint" id="boxLinkHint"></small></span>
+                <span class="ctrl"><button id="btnBoxLink" type="button" class="btn-light"></button></span>
+              </div>
+              <!-- (7차) 자주 쓰는 폴더 빠른 가져오기 -->
+              <div class="row">
+                <span class="lab"><b id="boxKnownLabel"></b><small class="hint" id="boxKnownHint"></small></span>
+                <span class="ctrl box-known" id="boxKnownBtns"></span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="boxListHeading"></h2>
+            <div id="boxList" class="box-list"></div>
+          </section>
+          <!-- (2026-10-13) 자동 정리 — settingsOrganizer.js. (5차) 확장자 규칙 화면은 뺌: 기본 정리함 + 제외목록 + 기록만 -->
+          <section class="sec">
+            <h2 id="orgHeading"></h2>
+            <div class="card">
+              <div class="row">
+                <span class="lab"><b id="orgDefaultLabel"></b><small class="hint" id="orgDefaultHint"></small></span>
+                <span class="ctrl"><b id="orgDefaultName"></b></span>
+              </div>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="orgExcludeHeading"></h2>
+            <div class="card card-pad">
+              <small class="hint" id="orgExcludeHint"></small>
+              <textarea id="orgExclude" class="org-exclude" rows="4" spellcheck="false"></textarea>
+            </div>
+          </section>
+          <section class="sec">
+            <h2 id="orgLogHeading"></h2>
+            <div id="orgLog" class="org-log"></div>
+          </section>
+        </div>
+
         <!-- ───── 도움말 ───── -->
         <!-- (0.23.0) 예전엔 설명서 전체를 iframe으로 여기 끼워 넣었는데, 설명서도 왼쪽 메뉴 구조가 돼서
              좁은 칸에 겹메뉴가 생김 → 버튼으로 별도 "사용 설명서" 창을 엶 -->
@@ -468,5 +542,7 @@
   <script src="../common/appFont.js"></script>
   <script src="../lang/ko.js"></script>
   <script src="settings.js"></script>
+  <script src="settingsBox.js"></script>
+  <script src="settingsOrganizer.js"></script>
 </body>
 </html>

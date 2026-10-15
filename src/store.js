@@ -45,7 +45,9 @@ const FILES = {
   holidays: path.join(DATA_DIR, 'holidays.json'),
   // 가계부 위트 멘트 문구 모음. 태훈님이 메모장으로 열어 직접 추가·수정할 수 있게 별도 파일로
   // 분리함(앱 재시작하면 반영). 파일이 없거나 깨져 있으면 기본 멘트로 자동 복구됨.
-  ments: path.join(DATA_DIR, '멘트.json')
+  ments: path.join(DATA_DIR, '멘트.json'),
+  // (2026-10-13) 자동 정리로 옮긴 기록(되돌리기용)
+  boxMoves: path.join(DATA_DIR, 'boxMoves.json')
 };
 
 // 가계부 기본 분류(처음 쓸 때 자동으로 채워짐. 설정에서 이름·색 수정, 추가·삭제 가능)
@@ -154,6 +156,22 @@ const DEFAULT_SETTINGS = {
   // 큰 그림이 메모보다 커서 크기 손잡이가 화면 밖으로 나가던 문제 때문에 생김. 넣는 순간에만 적용되고
   // 그다음은 메모 크기를 바꿔도 그림은 그대로(손잡이로만 바꿈). settings.json에서 직접 고칠 수 있음
   memoImageMaxHeightPercent: 70,
+  // (2026-10-13) 일정 색 — 구글 캘린더 일정 색 번호(colorId "1"~"11")별로 달력에 칠할 색.
+  // 번호는 구글이 정한 것이라 바꾸면 안 되고, 색 값(#RRGGBB)만 settings.json에서 직접 고칠 수 있음.
+  // 색을 안 고른 일정(번호 없음)은 지금까지처럼 앱 기본 금색. 이름은 구글 캘린더 화면의 이름
+  eventColors: {
+    '1': '#7986CB',  // 라벤더
+    '2': '#33B679',  // 세이지
+    '3': '#8E24AA',  // 포도
+    '4': '#E67C73',  // 플라밍고
+    '5': '#F6BF26',  // 바나나
+    '6': '#F4511E',  // 귤
+    '7': '#039BE5',  // 공작
+    '8': '#616161',  // 흑연
+    '9': '#3F51B5',  // 블루베리
+    '10': '#0B8043', // 바질
+    '11': '#D50000'  // 토마토
+  },
   // 앱 전체 글씨체(윈도우에 설치된 글씨체 이름). 비어있으면 지금까지와 동일한 기본 글씨체 사용.
   // 각 창의 css가 var(--app-font, 기본값) 을 쓰고, renderer/common/appFont.js가 이 값을 넣어줌
   fontFamily: '',
@@ -216,6 +234,76 @@ const DEFAULT_SETTINGS = {
     defaultDurationMin: 60,  // 앱에서 만든 시각 있는 일정을 구글에 보낼 때 길이(분)
     seriesRefreshHours: 24,  // 반복 일정 목록을 몇 시간마다 새로 받을지
     timeoutSec: 30           // 구글이 이 시간(초) 안에 답이 없으면 끊고 다음 주기에 다시
+  },
+  // (2026-10-13) 바탕화면 정리 박스. boxes = 박스 목록(박스 창·설정창이 관리 — 직접 고치지 말 것)
+  boxes: [],
+  // (6차) 정리함 묶음(탭으로 겹친 창) 목록 — 정리함 창·설정창이 관리(직접 고치지 말 것)
+  boxGroups: [],
+  // 박스 공통 설정 — 전부 settings.json 에서 직접 고칠 수 있음
+  box: {
+    defaultRoot: '',        // 새 박스 폴더를 만들 곳. 비우면 바탕화면
+    hideFolder: true,       // 새 박스 폴더를 숨김 폴더로 만들지(바탕화면에 폴더 아이콘이 안 보이게)
+    hoverExpandMs: 250,     // 접힌 박스 제목줄에 마우스를 올리고 몇 ms 뒤에 펼칠지
+    hoverCollapseMs: 700,   // 마우스가 박스 밖으로 나가고 몇 ms 뒤에 다시 접을지
+    hoverCheckMs: 150,      // 마우스가 박스 밖으로 나갔는지 몇 ms마다 확인할지
+    // (7차) 정렬을 안 정한 정리함·폴더 창: 'name'(이름순) | 'date'(날짜순, 최신이 위). 예전 defaultSort 는 안 씀
+    sortDefault: 'name',
+    maxItems: 200,          // (2026-10-14 1000→200, 버벅임) (7차) 한 창에 아이콘을 최대 몇 개까지 그릴지(넘으면 최근 것부터, 맨 아래에 "N개까지만 보여요" 안내)
+    // (11차) 폴더 창 "지난주까지만 보기"(folderShowUntil)는 삭제 — 늘 전부 보임
+    tabDragPx: 8,           // (7차) 탭을 몇 px 이상 끌어야 "끌기"로 볼지(덜 움직이면 클릭 = 탭 바꾸기)
+    // (9차) 접어둔 제목줄 자동 숨김(바탕화면에 깔린 접힌 창만). 마우스를 올리면 다시 나타남
+    collapsedHideSeconds: 8, // 마우스가 안 올라간 채 몇 초 지나면 사라질지. 0 이면 안 사라짐
+    fadeMs: 400,            // 사라지는 속도(ms)
+    fadeInMs: 80,           // (11차) 다시 나타나는 속도(ms). 마우스를 올리면 이만큼 걸려 나타남
+    fadedOpacity: 0,        // 사라졌을 때 진하기 %(0 = 완전히 안 보임, 10 이면 희미하게 남음)
+    fadeCheckMs: 200,       // 마우스가 올라왔는지 몇 ms마다 확인할지(앱을 다시 켜야 적용)
+    coverCheck: true,       // (2026-10-15) 다른 창에 가려진 정리함은 마우스 올림에 반응 안 함. false 면 예전처럼
+    coverMaxWalk: 3000,     // (2026-10-15) 가려졌는지 볼 때 위쪽 창을 최대 몇 개까지 살펴볼지
+    wakeExpand: true,       // (2026-10-15) 숨은 정리함에 마우스를 올리면 제목줄과 내용을 함께 펼쳐 보여줌. false 면 제목줄만 먼저
+    wakeRetryMs: 150,       // (2026-10-15) 숨은 정리함: 가려져서 무시된 뒤 몇 ms 뒤에 다시 확인할지
+    kakaoFolder: '',        // (7차) 카카오톡 받은 파일 폴더. 비우면 내 문서\\카카오톡 받은 파일
+    settingsAutoCloseMs: 150, // (10차) ⋯ 메뉴로 연 설정창: 바깥을 누르고 몇 ms 뒤 닫을지(안을 한 번도 안 건드렸을 때만)
+    settingsAutoCloseGraceMs: 800, // (10차) 설정창을 연 직후 몇 ms 동안은 바깥으로 가도 안 닫음(메뉴 닫힐 때 포커스 튐 방지)
+    iconSize: 40,           // 새 정리함 아이콘 크기(px). 정리함마다 Ctrl+휠 또는 설정창에서 바꿀 수 있음
+    iconSizeMin: 16,        // 아이콘 크기 최소(px)
+    iconSizeMax: 128,       // 아이콘 크기 최대(px)
+    iconSizeStep: 8,        // Ctrl+휠 한 칸에 바뀌는 크기(px)
+    titleHeight: 30,        // 박스 제목줄 높이(px) = 접혔을 때 높이
+    defaultWidth: 340,      // 새 박스 가로(px)
+    defaultHeight: 240,     // 새 박스 세로(px)
+    opacity: 100,           // 박스 창 투명도(20~100)
+    // (4차) 공통 스타일 — 모든 정리함이 같이 씀(설정 > 바탕화면 정리 맨 위에서 바꿈)
+    barColor: '#2B2820',    // 제목줄 색
+    bgColor: '#F7F4EC',     // 배경색
+    bgTransparency: 40,     // 배경 투명도 %(0=불투명, 100=완전 투명). 아이콘·글씨는 그대로 선명
+    watchDebounceMs: 400,   // 폴더 내용이 바뀐 뒤 몇 ms 기다렸다 화면을 새로 그릴지
+    toastSeconds: 4,        // "못 옮긴 것" 안내가 몇 초 보일지
+    // (2026-10-13 시작속도) 윈도우 미리보기 그림을 받을 확장자. 여기 없는 파일은 프로그램 아이콘으로 보여줌
+    // (eps·ai·psd·pdf 등은 미리보기를 만드는 동안 앱 전체가 수십 초 멈춰서 뺌 — 넣으면 다시 미리보기가 나오지만 느려질 수 있음)
+    thumbExts: 'jpg,jpeg,jfif,png,gif,bmp,webp,ico,tif,tiff',
+    tipDelayMs: 600,        // (13차) 아이콘에 마우스를 올리고 몇 ms 뒤에 이름표를 보여줄지
+    tipMaxMs: 5000,         // (13차) 이름표가 몇 ms 뒤 저절로 사라질지(0 = 마우스가 나갈 때만)
+    shellIcon: true,        // (13차-3) 아이콘을 탐색기와 같은 방식(PowerShell 아이콘 도우미)으로 받을지. false 면 옛 방식만
+    shellIconTimeoutMs: 8000, // (13차-3) 아이콘 하나에 이만큼(ms) 넘게 걸리면 도우미를 다시 켜고 그 확장자는 옛 방식으로
+    listIconWaitMs: 500,    // (13차-3) 목록을 그릴 때 아이콘을 최대 몇 ms 기다릴지(늦은 건 나중에 채움)
+    startDelayMs: 1500      // (2026-10-13 시작속도) 앱을 켜면 위젯이 화면에 뜨고 몇 ms 뒤에 박스를 열지
+  },
+  // (2026-10-13) 자동 정리 — "기본 정리함"을 정해 두면 바탕화면에 새로 생긴(복사·다운로드·새로 만든) 파일·폴더를
+  // 전부 그 정리함으로 옮김(태훈님 결정: 확장자 규칙은 복잡해서 화면에서 뺌 — useRules 를 true 로 하면 규칙도 씀).
+  // 기본 정리함·제외목록은 설정창에서, 숫자는 여기서 직접 고칠 수 있음
+  organizer: {
+    enabled: false,         // 기본 정리함을 정하면 자동으로 켜지고, 해제하면 꺼짐
+    defaultBoxId: null,     // 기본 정리함(정리함 id)
+    useRules: false,        // true 면 아래 확장자 규칙을 기본 정리함보다 먼저 적용(지금은 화면 없음)
+    watchFolders: [],       // 비어 있으면 바탕화면
+    rules: null,            // null 이면 기본 규칙(문서/바로가기/이미지/압축파일) — src/organizer.js DEFAULT_RULES
+    exclude: [],            // 절대 안 건드릴 이름(한 줄에 하나, * 사용 가능 예: 보고서*.pdf)
+    settleSeconds: 5,       // 새 파일이 생기고 몇 초 동안 크기가 안 바뀌면 옮길지(다운로드 중인 파일 보호)
+    renameWaitSeconds: 60,  // "새 폴더", "새 텍스트 문서.txt"처럼 이름을 아직 안 바꾼 것은 이 시간 동안 기다림(이름 짓는 중에 사라지지 않게)
+    maxWaitMinutes: 30,     // 이 시간 넘게 계속 크기가 바뀌면 그 파일은 포기(다음 "지금 정리" 때 처리)
+    newFileMinutes: 10,     // 만든 지 이 시간(분) 안 된 파일만 "새 파일"로 봄 — 다른 폴더에서 옮겨 온 것·정리함에서 꺼낸 것은 안 건드리려고
+    takenOutIgnoreMinutes: 3, // 정리함에서 끌어낸 파일 이름은 이 시간 동안 자동 정리 안 함
+    logMax: 300             // 되돌리기 기록 최대 개수
   },
   autoBackup: {
     enabled: false,
@@ -291,6 +379,17 @@ function writeJson(filePath, data) {
 }
 
 module.exports = {
+  // (2026-10-13) 박스 기본값 — src/box.js 가 settings.json 값과 합쳐 씀
+  DEFAULT_BOX: DEFAULT_SETTINGS.box,
+  DEFAULT_ORGANIZER: DEFAULT_SETTINGS.organizer,
+  getBoxMoves() {
+    const v = readJson(FILES.boxMoves, []);
+    return Array.isArray(v) ? v : [];
+  },
+  saveBoxMoves(list) {
+    writeJson(FILES.boxMoves, list);
+    return list;
+  },
   getSettings() {
     return { ...DEFAULT_SETTINGS, ...readJson(FILES.settings, {}) };
   },

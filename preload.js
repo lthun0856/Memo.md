@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // 알람 소리: 메인 프로세스가 'alarm:playSound'를 이 창으로 보내면 짧은 "딩동" 소리를 냄.
 // 창 웹오디오로 직접 재생하므로 별도 음원 파일이 필요 없음(창의 autoplayPolicy 허용 필요).
@@ -230,4 +230,84 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('memoLink:selected', (e, fileNameNoExt) => callback(fileNameNoExt)),
   onMoveTopicSelected: (callback) =>
     ipcRenderer.on('moveTopic:selected', (e, topicId) => callback(topicId))
+});
+
+// (2026-10-13) 바탕화면 정리 박스 — 박스 창, 설정창 "바탕화면 정리" 메뉴, 위젯 📦 버튼이 씀.
+// 기존 api 와 섞이지 않게 이름을 boxApi 로 따로 둠
+contextBridge.exposeInMainWorld('boxApi', {
+  // 박스 창
+  list: () => ipcRenderer.invoke('box:list'),
+  open: (p) => ipcRenderer.invoke('box:open', p),
+  moveIn: (paths) => ipcRenderer.invoke('box:moveIn', paths),
+  dropAt: (paths, anchor, after) => ipcRenderer.invoke('box:dropAt', { paths, anchor, after: !!after }), // (10차) 직접 정렬
+  // 끌어넣은 파일의 실제 경로(Electron 32부터 file.path 가 없어져서 webUtils 를 먼저 씀)
+  pathForFile: (file) => {
+    try { return (webUtils && webUtils.getPathForFile(file)) || file.path || ''; } catch (e) { return (file && file.path) || ''; }
+  },
+  startDrag: (paths) => ipcRenderer.send('box:startDrag', paths),
+  dragStart: () => ipcRenderer.send('box:dragStart'),
+  dragMove: () => ipcRenderer.send('box:dragMove'),
+  dragEnd: () => ipcRenderer.send('box:dragEnd'),
+  // (7차) 탭 끌어서 묶기·빼기, 받는 쪽 강조, 폴더 창 "탐색기에서 보기 / 전부 보기"
+  tabDragStart: (boxId) => ipcRenderer.send('box:tabDragStart', boxId),
+  tabDragMove: () => ipcRenderer.invoke('box:tabDragMove'),
+  tabDragEnd: (cancel) => ipcRenderer.invoke('box:tabDragEnd', !!cancel),
+  reorderTabs: (ids) => ipcRenderer.invoke('box:reorderTabs', ids), // (11차) 묶음 안 탭 순서
+  onMergeHint: (cb) => ipcRenderer.on('box:mergeHint', (e, v) => cb(!!v)),
+  openFolderSelf: () => ipcRenderer.invoke('box:openFolderSelf'),
+  setIconSize: (n) => ipcRenderer.invoke('box:setIconSize', n),
+  resizeStart: () => ipcRenderer.send('box:resizeStart'),
+  resizeMove: () => ipcRenderer.send('box:resizeMove'),
+  resizeEnd: () => ipcRenderer.send('box:resizeEnd'),
+  setExpanded: (v) => ipcRenderer.invoke('box:setExpanded', v),
+  toggleCollapsed: () => ipcRenderer.invoke('box:toggleCollapsed'),
+  itemMenu: (paths) => ipcRenderer.invoke('box:itemMenu', paths),
+  trash: (paths) => ipcRenderer.invoke('box:trash', paths), // (11차) 휴지통으로
+  boxMenu: (boxId) => ipcRenderer.invoke('box:boxMenu', boxId || null),
+  setActive: (boxId) => ipcRenderer.invoke('box:setActive', boxId),
+  moveInTo: (boxId, paths) => ipcRenderer.invoke('box:moveInTo', { boxId, paths }),
+  closeSelf: () => ipcRenderer.invoke('box:closeSelf'),
+  changeFolderSelf: () => ipcRenderer.invoke('box:changeFolderSelf'),
+  onChanged: (cb) => ipcRenderer.on('box:changed', () => cb()),
+  onExpanded: (cb) => ipcRenderer.on('box:expanded', (e, v) => cb(v)),
+  onFaded: (cb) => ipcRenderer.on('box:faded', (e, v) => cb(!!v)), // (9차) 접힌 제목줄 숨김/다시 보임
+  wake: () => ipcRenderer.send('box:wake'), // (11차) 숨은 창 위에 마우스가 올라옴 → 바로 보이게
+  activate: () => ipcRenderer.send('box:activate'), // (11차) 정리함 안을 누름 → 앞으로 + 키보드(Delete 키)
+  onToast: (cb) => ipcRenderer.on('box:toast', (e, t) => cb(t)),
+  // 설정창
+  getAll: () => ipcRenderer.invoke('box:getAll'),
+  getOptions: () => ipcRenderer.invoke('box:getOptions'),
+  create: (name, how) => ipcRenderer.invoke('box:create', name, how || null),
+  getKnown: () => ipcRenderer.invoke('box:getKnown'),
+  linkKnown: (key) => ipcRenderer.invoke('box:linkKnown', key),
+  link: () => ipcRenderer.invoke('box:link'),
+  remove: (id) => ipcRenderer.invoke('box:remove', id),
+  update: (id, patch) => ipcRenderer.invoke('box:update', { id, patch }),
+  changeFolder: (id) => ipcRenderer.invoke('box:changeFolder', id),
+  openFolder: (id) => ipcRenderer.invoke('box:openFolder', id),
+  openWindow: (id) => ipcRenderer.invoke('box:openWindow', id),
+  onListChanged: (cb) => ipcRenderer.on('box:listChanged', () => cb()),
+  onShowTab: (cb) => ipcRenderer.on('box:showTab', () => cb()),
+  settingsTouched: () => ipcRenderer.send('box:settingsTouched'), // (10차) ⋯로 연 설정창 자동 닫기 끄기
+  // 위젯
+  showWidgetMenu: () => ipcRenderer.invoke('box:widgetMenu'),
+  // (4차) 공통 스타일
+  getStyle: () => ipcRenderer.invoke('box:getStyle'),
+  setDefault: (id, on) => ipcRenderer.invoke('box:setDefault', { id, on }),
+  setGroup: (id, groupId) => ipcRenderer.invoke('box:setGroup', { id, groupId }),
+  setStyle: (patch) => ipcRenderer.invoke('box:setStyle', patch)
+});
+
+// (2026-10-13) 자동 정리 — 설정창 > 바탕화면 정리 > 자동 정리
+contextBridge.exposeInMainWorld('orgApi', {
+  get: () => ipcRenderer.invoke('organizer:get'),
+  save: (patch) => ipcRenderer.invoke('organizer:save', patch),
+  resetRules: () => ipcRenderer.invoke('organizer:resetRules'),
+  addFolder: () => ipcRenderer.invoke('organizer:addFolder'),
+  removeFolder: (folder) => ipcRenderer.invoke('organizer:removeFolder', folder),
+  preview: () => ipcRenderer.invoke('organizer:preview'),
+  runNow: () => ipcRenderer.invoke('organizer:runNow'),
+  getLog: () => ipcRenderer.invoke('organizer:getLog'),
+  undo: (ids) => ipcRenderer.invoke('organizer:undo', ids),
+  onLogChanged: (cb) => ipcRenderer.on('organizer:logChanged', () => cb())
 });

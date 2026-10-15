@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title></title>
+  <link rel="stylesheet" href="box.css" />
+</head>
+<body>
+  <!-- (2026-10-13) 바탕화면 정리 박스 창. 박스 = 진짜 폴더(내용은 src/box.js 가 읽어 줌) -->
+  <div class="box" id="box">
+    <div class="bar" id="bar">
+      <div class="tabs" id="tabs" hidden></div>
+      <span class="name" id="boxName"></span>
+      <span class="badge" id="boxBadge" hidden></span>
+      <span class="count" id="boxCount"></span>
+      <button class="bar-btn" id="btnPin" type="button"></button>
+      <button class="bar-btn" id="btnMenu" type="button">⋯</button>
+      <button class="bar-btn" id="btnClose" type="button" hidden>✕</button>
+    </div>
+    <div class="body" id="body">
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="empty" hidden></div>
+      <div class="missing" id="missing" hidden>
+        <p id="missingText"></p>
+        <button id="btnRelink" type="button"></button>
+      </div>
+    </div>
+    <div class="grip" id="grip"></div>
+    <div class="toast" id="toast" hidden></div>
+  </div>
+
+  <script src="../common/appFont.js"></script>
+  <script src="../lang/ko.js"></script>
+  <script src="box.js"></script>
+</body>
+</html>

@@ -42,11 +42,29 @@ const DELETED_CAT_COLOR = '#8A8577'; // 삭제된 분류의 기록에 쓰는 회
 // 달력에 그릴 항목: "YYYY-MM-DD" -> [{ kind:'event'|'memo', id, title, color, hasAlarm, time }]
 // (0.21.0) kind 'event' = 일정(events.json), 'memo' = 날짜가 붙은 메모(다른 주제 메모 등)
 let eventsByDate = {};
+// (2026-10-13) 기간 일정(며칠짜리) — 칸마다 칩으로 안 넣고 여기 따로 모아 "막대"로 그림
+// [{ kind:'event', id, title, color, hasAlarm, time:'', startKey, endKey }]
+let spanEvents = [];
 let calEventsCache = []; // 일정(events.json) 전체 — 지운 것(deletedAt)은 loadEvents에서 거름
 let purgedCache = [];    // 완전삭제한 일정 기록 [{id, sourceMemoId}] — 원본 메모가 다시 안 보이게
 // (0.22.0) 구글 반복 일정 회차 [{id, masterId, title, note, start}] — 보기 전용(수정은 구글에서)
 let seriesCache = [];
-const EVENT_COLOR = '#C9A24B'; // 일정 칩 색(앱 기본 금색). 메모는 주제 색
+const EVENT_COLOR = '#C9A24B'; // 일정 칩 색(앱 기본 금색 = 색 안 고른 일정). 메모는 주제 색
+// (2026-10-13) 일정 색 = 구글 캘린더 일정 색 번호(colorId "1"~"11"). 실제 색 값은 settings.json eventColors 에서
+// 읽음(고칠 수 있게). 아래는 설정을 못 읽었을 때만 쓰는 예비값 — src/store.js 기본값과 같음
+const EVENT_COLOR_FALLBACK = {
+  '1': '#7986CB', '2': '#33B679', '3': '#8E24AA', '4': '#E67C73', '5': '#F6BF26', '6': '#F4511E',
+  '7': '#039BE5', '8': '#616161', '9': '#3F51B5', '10': '#0B8043', '11': '#D50000'
+};
+// 색 고르기 동그라미 순서·이름(구글 캘린더 화면 순서). 맨 앞 '' = 기본(금색)
+const EVENT_COLOR_CHOICES = [
+  ['', '기본'], ['11', '토마토'], ['4', '플라밍고'], ['6', '귤'], ['5', '바나나'], ['2', '세이지'],
+  ['10', '바질'], ['7', '공작'], ['9', '블루베리'], ['1', '라벤더'], ['3', '포도'], ['8', '흑연']
+];
+let eventColorMap = { ...EVENT_COLOR_FALLBACK };
+function eventColorOf(colorId) {
+  return (colorId && eventColorMap[colorId]) || EVENT_COLOR;
+}
 let memosCache = [];   // 마지막으로 불러온 전체 메모(그날 목록/새 메모에 사용)
 let topicsCache = [];  // 마지막으로 불러온 전체 주제(새 메모 주제 선택에 사용)
 const NEW_MEMO_TIME = '09:00'; // 달력에서 새 메모 만들 때 기본 시각(메모창에서 바꿀 수 있음)
@@ -60,6 +78,18 @@ function scheduleTimeLabel(scheduleAt) {
   if (typeof scheduleAt !== 'string' || scheduleAt.length < 16) return '';
   const t = scheduleAt.slice(11, 16);
   return t === '00:00' ? '' : t;
+}
+
+// 기간 일정의 마지막 날("YYYY-MM-DD", 그날 포함). 하루짜리면 null.
+// - 기간 일정은 시각 없는 종일(00:00)만 / endDate 칸이 아예 없는 옛 일정은 구글에서 받은 일수로 계산
+// [주의] src/gsync.js 의 eventEndKey 와 똑같은 규칙이어야 함(한쪽만 고치면 달력과 동기화가 어긋남)
+function eventEndKey(ev) {
+  if (!ev || typeof ev.start !== 'string' || ev.start.slice(11, 16) !== '00:00') return null;
+  const sk = ev.start.slice(0, 10);
+  let end = null;
+  if (Object.prototype.hasOwnProperty.call(ev, 'endDate')) end = ev.endDate;
+  else if (ev.google && ev.google.allDayDays > 1) end = addDaysKey(sk, ev.google.allDayDays - 1);
+  return (typeof end === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(end) && end > sk) ? end : null;
 }
 
 // 일정으로 복사된 원본 메모인지(그렇다면 달력엔 일정 쪽만 그림 — 중복 방지).
@@ -83,14 +113,24 @@ function loadEvents(memos, topics, events, purged, series) {
   const cov = buildCoverage(events, purged);
 
   const map = {};
+  const spans = [];
   // 일정(events.json)
   (events || []).forEach((ev) => {
     if (ev.deletedAt || typeof ev.start !== 'string') return;
     const dateKey = ev.start.slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
     const title = (ev.title && ev.title.trim()) ? ev.title.trim() : '(제목 없음)';
+    // 기간 일정은 막대 목록으로 따로(칸 칩에는 안 넣음)
+    const endKey = eventEndKey(ev);
+    if (endKey) {
+      spans.push({
+        kind: 'event', id: ev.id, title, color: eventColorOf(ev.colorId),
+        hasAlarm: !!(ev.alarm && ev.alarm.enabled), time: '', startKey: dateKey, endKey
+      });
+      return;
+    }
     (map[dateKey] || (map[dateKey] = [])).push({
-      kind: 'event', id: ev.id, title, color: EVENT_COLOR,
+      kind: 'event', id: ev.id, title, color: eventColorOf(ev.colorId),
       hasAlarm: !!(ev.alarm && ev.alarm.enabled), time: scheduleTimeLabel(ev.start)
     });
   });
@@ -122,6 +162,14 @@ function loadEvents(memos, topics, events, purged, series) {
     map[k].sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
   });
   eventsByDate = map;
+  // 막대 순서: 먼저 시작하는 것 → 긴 것 → 제목 순(주마다 줄 배치할 때 이 순서로 자리를 잡음)
+  spans.sort((a, b) => a.startKey.localeCompare(b.startKey) || b.endKey.localeCompare(a.endKey) || a.title.localeCompare(b.title));
+  spanEvents = spans;
+}
+
+// 그날에 걸친 기간 일정들(막대)
+function spansOnDate(dateKey) {
+  return spanEvents.filter((sp) => sp.startKey <= dateKey && dateKey <= sp.endKey);
 }
 
 async function reloadData() {
@@ -473,6 +521,14 @@ async function loadCalendarSettings() {
     // 달력 색상 6종(설정 > 달력). 각각 CSS 변수 하나에 대응하고, 나머지 색은 CSS에서 자동 계산됨
     applyCalendarColors((s && s.calendar) || {});
     loadProgressSettings((s && s.calendar) || {}); // 진행 띠 설정(progress.js)
+    // 일정 색 표(settings.json eventColors). 이상한 값은 예비값으로
+    const ec = (s && s.eventColors && typeof s.eventColors === 'object') ? s.eventColors : {};
+    eventColorMap = {};
+    Object.keys(EVENT_COLOR_FALLBACK).forEach((k) => {
+      eventColorMap[k] = (typeof ec[k] === 'string' && /^#[0-9a-fA-F]{6}$/.test(ec[k])) ? ec[k] : EVENT_COLOR_FALLBACK[k];
+    });
+    // 이미 불러온 일정이 있으면 새 색으로 다시 칠함
+    if (calEventsCache.length) loadEvents(memosCache, topicsCache, calEventsCache, purgedCache, seriesCache);
     // 공휴일 캐시 초기화 — 설정을 다시 읽는 시점(최초 실행 + ⚙설정 변경 시)마다 비워서,
     // API 키를 새로 넣거나 바꿨을 때 곧바로 다시 시도하게 함(안 비우면 "키 없음" 결과가 계속 남음)
     holidayCache = {};
@@ -511,6 +567,7 @@ async function annotateLunar() {
     const l = lunarCache[s.dataset.lunarFor];
     if (l) s.textContent = lunarText(l);
   });
+  schedulePositionBars(); // 음력 글자가 채워지며 칸 윗부분 높이가 바뀔 수 있음
 }
 
 // 화면에 만들어둔 공휴일 이름 자리(data-holiday-for)들을 채움. 그리드에 걸친 연도만 모아서
@@ -541,6 +598,7 @@ async function annotateHolidays() {
       if (cell) cell.classList.remove('holiday');
     }
   });
+  schedulePositionBars(); // 공휴일 이름이 생기면 그 칸만 한 줄 내려가므로 막대 줄 다시 맞춤
 }
 
 // 오늘 날짜(연/월/일)를 로컬로 구해둠 — "오늘 강조"와 "지난 날짜" 판단용
@@ -605,7 +663,8 @@ function renderTitle() {
 }
 
 // 날짜 칸 하나 만들기(월간/주간 공용)
-function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips) {
+// laneInfo = { lanes, hidden } — 이 칸 위를 지나가는 기간 일정 막대가 차지할 줄 수 / 줄이 모자라 못 그린 막대 수
+function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips, laneInfo) {
   const cell = document.createElement('div');
   cell.className = 'cal-cell';
 
@@ -701,11 +760,21 @@ function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips) 
   }
 
   // 이 날짜에 일정(메모)이 있으면 주제 색 칩으로 표시(알람 걸린 건 🔔)
-  const dayEvents = eventsByDate[dateKey];
-  if (dayEvents && dayEvents.length) {
+  // (2026-10-13) 기간 일정 막대가 지나가는 칸은 위쪽에 빈 줄(.cal-lane)을 먼저 깔아 자리를 비워 둠 →
+  //   막대는 positionBars()가 그 빈 줄 위치에 겹쳐 그림. 칩은 남은 줄 수만큼만 보여줌
+  const dayEvents = eventsByDate[dateKey] || [];
+  const lanes = laneInfo ? laneInfo.lanes : 0;
+  const hiddenSpans = laneInfo ? laneInfo.hidden : 0;
+  const room = Math.max(0, maxChips - lanes);
+  {
     const box = document.createElement('div');
     box.className = 'cal-events';
-    dayEvents.slice(0, maxChips).forEach((ev) => {
+    for (let l = 0; l < lanes; l++) {
+      const ln = document.createElement('div');
+      ln.className = 'cal-lane';
+      box.appendChild(ln);
+    }
+    dayEvents.slice(0, room).forEach((ev) => {
       const chip = document.createElement('div');
       chip.className = 'cal-event' + (ev.kind === 'memo' ? ' is-memo' : '') + (ev.kind === 'gseries' ? ' is-series' : '');
       chip.style.borderLeftColor = ev.color;
@@ -730,10 +799,11 @@ function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips) 
       });
       box.appendChild(chip);
     });
-    if (dayEvents.length > maxChips) {
+    const hiddenCount = Math.max(0, dayEvents.length - room) + hiddenSpans;
+    if (hiddenCount > 0) {
       const more = document.createElement('div');
       more.className = 'cal-more';
-      more.textContent = `+${dayEvents.length - maxChips}`;
+      more.textContent = `+${hiddenCount}`;
       box.appendChild(more);
     }
     cell.appendChild(box);
@@ -745,6 +815,205 @@ function buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, maxChips) 
   }
 
   return cell;
+}
+
+/* ---- 기간 일정 막대 (2026-10-13, 태훈님 확정) ----
+   며칠짜리 일정은 날짜 칸을 가로지르는 막대 하나로 그림. 주가 바뀌면 줄마다 나눠서 그림(줄마다 제목 표시).
+   - 칸 안에는 막대 자리만큼 빈 줄(.cal-lane)을 깔아 두고, 막대는 그리드 위의 투명 층(.cal-bar-layer)에
+     그 빈 줄 위치를 재서 겹쳐 그림(칸끼리 떨어져 있어서 칸 안에 그리면 막대가 끊겨 보임)
+   - 창 크기가 바뀌거나 공휴일·음력 글자가 늦게 채워지면 positionBars()로 다시 잼
+   - 같은 주 칸들은 일정 칸 시작 높이를 맞춤(공휴일 이름이 있는 칸만 한 줄 더 내려가 있어서) */
+let barRows = []; // [{ cells:[칸 7개], segs:[{sp,c0,c1,lane,contLeft,contRight,el}], perCol }]
+
+// 한 주(7칸) 안의 막대 줄 배치. keys = 그 주 날짜키 7개(순서대로), maxLanes = 칸에 보일 최대 줄 수
+function layoutSpanWeek(keys, maxLanes) {
+  const first = keys[0];
+  const last = keys[keys.length - 1];
+  const perCol = keys.map(() => ({ lanes: 0, hidden: 0 }));
+  const segs = [];
+  const laneEnd = []; // 줄마다 마지막으로 찬 칸 번호
+  spanEvents.forEach((sp) => {
+    if (sp.endKey < first || sp.startKey > last) return;
+    const c0 = keys.indexOf(sp.startKey < first ? first : sp.startKey);
+    const c1 = keys.indexOf(sp.endKey > last ? last : sp.endKey);
+    if (c0 < 0 || c1 < 0) return;
+    let lane = 0;
+    while (lane < laneEnd.length && laneEnd[lane] >= c0) lane++;
+    laneEnd[lane] = c1;
+    if (lane >= maxLanes) { // 줄이 모자람 → 막대는 못 그리고 칸마다 "+N"에 더함
+      for (let c = c0; c <= c1; c++) perCol[c].hidden++;
+      return;
+    }
+    for (let c = c0; c <= c1; c++) perCol[c].lanes = Math.max(perCol[c].lanes, lane + 1);
+    segs.push({ sp, c0, c1, lane, contLeft: sp.startKey < first, contRight: sp.endKey > last, el: null });
+  });
+  return { segs, perCol };
+}
+
+function buildBar(sg) {
+  const sp = sg.sp;
+  const t = todayParts();
+  const todayKey = dateKeyOf(t.y, t.m, t.d);
+  const el = document.createElement('div');
+  el.className = 'cal-bar'
+    + (sg.contLeft ? ' cont-left' : ' is-start')
+    + (sg.contRight ? ' cont-right' : ' is-end')
+    + (sp.endKey < todayKey ? ' is-past' : '');
+  el.style.setProperty('--bar-color', sp.color);
+  el.title = `${sp.title} (${shortDate(sp.startKey)} ~ ${shortDate(sp.endKey)})`;
+  const tt = document.createElement('span');
+  tt.className = 'cal-event-title';
+  tt.textContent = sp.title;
+  el.appendChild(tt);
+  if (sp.hasAlarm) {
+    const bell = document.createElement('span');
+    bell.className = 'cal-event-bell';
+    bell.textContent = '🔔';
+    el.appendChild(bell);
+  }
+  // 막대를 누르면 일정 창(칸 클릭 목록과 겹치지 않게 전파 중단, 잠금 중엔 무반응)
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (locked) return;
+    openItem(sp);
+  });
+  return el;
+}
+
+// 막대 요소를 만들어 투명 층에 넣고 위치를 잼
+function drawBars(grid) {
+  if (!barRows.some((r) => r.segs.length)) return;
+  const layer = document.createElement('div');
+  layer.className = 'cal-bar-layer';
+  barRows.forEach((r) => r.segs.forEach((sg) => {
+    sg.el = buildBar(sg);
+    layer.appendChild(sg.el);
+  }));
+  grid.appendChild(layer);
+  positionBars();
+}
+
+function positionBars() {
+  const grid = document.getElementById('cal-grid');
+  const layer = grid && grid.querySelector('.cal-bar-layer');
+  if (!layer) return;
+  const base = layer.getBoundingClientRect();
+  barRows.forEach((row) => {
+    if (!row.segs.length) return;
+    // ① 같은 주 칸들의 일정 칸 시작 높이 맞추기
+    const boxes = row.cells.map((c) => c.querySelector('.cal-events'));
+    boxes.forEach((b) => { if (b) b.style.paddingTop = ''; });
+    const tops = boxes.map((b) => (b ? b.getBoundingClientRect().top : 0));
+    const maxTop = Math.max(...tops);
+    boxes.forEach((b, i) => { if (b && maxTop - tops[i] > 0.5) b.style.paddingTop = (maxTop - tops[i]) + 'px'; });
+    // ② 막대 위치 = 시작 칸의 빈 줄 위치 ~ 끝 칸의 오른쪽 끝
+    row.segs.forEach((sg) => {
+      const el = sg.el;
+      if (!el) return;
+      const c0 = row.cells[sg.c0];
+      const c1 = row.cells[sg.c1];
+      const lane = c0 && c0.querySelectorAll('.cal-lane')[sg.lane];
+      if (!lane || !c1) { el.style.display = 'none'; return; }
+      const lr = lane.getBoundingClientRect();
+      const r0 = c0.getBoundingClientRect();
+      const r1 = c1.getBoundingClientRect();
+      // 창이 작아서 빈 줄이 칸 밖으로 밀려났으면 막대도 숨김(칸 밖에 둥둥 떠 보이지 않게)
+      if (lr.height <= 0 || lr.bottom > r0.bottom - 1) { el.style.display = 'none'; return; }
+      el.style.display = '';
+      const left = lr.left - base.left;
+      const right = (r1.right - (r0.right - lr.right)) - base.left;
+      el.style.left = left + 'px';
+      el.style.top = (lr.top - base.top) + 'px';
+      el.style.width = Math.max(0, right - left) + 'px';
+      el.style.height = lr.height + 'px';
+    });
+  });
+}
+
+// 여러 번 불려도 한 번만(다음 화면 그릴 때) 다시 잼
+let barPosQueued = false;
+function schedulePositionBars() {
+  if (barPosQueued) return;
+  barPosQueued = true;
+  requestAnimationFrame(() => { barPosQueued = false; positionBars(); });
+}
+
+/* ---- 날짜를 끌어서 기간 일정 추가 (2026-10-13, 태훈님 확정) ----
+   월간/주간에서 시작 날짜를 누른 채 끝 날짜까지 끌고 가서 놓으면 → 기간 일정 입력 창(시작·종료일 채워짐)
+   - 한 칸 안에서 누르고 떼면 지금처럼 그날 목록(그냥 클릭)
+   - 잠금 중·가계부 모드·일간 뷰에선 안 됨 / 시작은 이번 달 칸에서만(끝은 지난달·다음달 칸도 됨)
+   - 끌다가 제자리로 돌아와서 놓거나 Esc = 취소
+   [주의] 끌기를 끝낸 뒤 따라오는 click 은 막아야 함(안 막으면 그날 목록이 같이 뜰 수 있음) */
+let dragSel = null;          // { startKey, curKey, active }
+let suppressGridClick = false;
+
+function cellAt(x, y) {
+  const els = document.elementsFromPoint(x, y);
+  for (const el of els) {
+    if (el.classList && el.classList.contains('cal-cell') && el.dataset.date) return el;
+  }
+  return null;
+}
+function clearDragSel() {
+  document.querySelectorAll('.cal-cell.drag-sel').forEach((c) => c.classList.remove('drag-sel'));
+}
+function paintDragSel() {
+  if (!dragSel) return;
+  const a = dragSel.startKey < dragSel.curKey ? dragSel.startKey : dragSel.curKey;
+  const b = dragSel.startKey < dragSel.curKey ? dragSel.curKey : dragSel.startKey;
+  document.querySelectorAll('#cal-grid .cal-cell[data-date]').forEach((c) => {
+    const k = c.dataset.date;
+    c.classList.toggle('drag-sel', k >= a && k <= b);
+  });
+}
+function cancelDrag() {
+  dragSel = null;
+  clearDragSel();
+}
+function wireRangeDrag() {
+  const grid = document.getElementById('cal-grid');
+  grid.addEventListener('mousedown', (e) => {
+    suppressGridClick = false;
+    if (e.button !== 0 || locked || mode !== 'calendar') return;
+    if (state.view !== 'month' && state.view !== 'week') return;
+    const cell = cellAt(e.clientX, e.clientY);
+    if (!cell || cell.dataset.otherMonth === '1') return;
+    dragSel = { startKey: cell.dataset.date, curKey: cell.dataset.date, active: false };
+    e.preventDefault(); // 끄는 동안 글자가 선택돼 파랗게 칠해지지 않게
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragSel) return;
+    if (!(e.buttons & 1) || locked) { cancelDrag(); return; } // 창 밖에서 버튼을 뗐거나 잠김
+    const cell = cellAt(e.clientX, e.clientY);
+    if (!cell) return;
+    dragSel.curKey = cell.dataset.date;
+    if (dragSel.curKey !== dragSel.startKey) dragSel.active = true;
+    if (dragSel.active) paintDragSel();
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragSel) return;
+    const d = dragSel;
+    cancelDrag();
+    if (!d.active) return; // 한 칸 안에서 누르고 뗌 = 그냥 클릭(원래 동작)
+    suppressGridClick = true;
+    setTimeout(() => { suppressGridClick = false; }, 0);
+    if (locked || d.curKey === d.startKey) return; // 제자리로 돌아와서 놓음 = 취소
+    const a = d.startKey < d.curKey ? d.startKey : d.curKey;
+    const b = d.startKey < d.curKey ? d.curKey : d.startKey;
+    openRangeAddPanel(a, b);
+  });
+  grid.addEventListener('click', (e) => {
+    if (!suppressGridClick) return;
+    suppressGridClick = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && dragSel) cancelDrag();
+  });
+  // 창 크기가 바뀌면 막대 위치 다시 잼
+  if (window.ResizeObserver) new ResizeObserver(() => schedulePositionBars()).observe(grid);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedulePositionBars()).catch(() => {});
 }
 
 // ---- 월간 뷰 ----
@@ -762,12 +1031,15 @@ function renderGrid() {
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const daysInPrev = new Date(y, m, 0).getDate();
 
+  let curRow = null; // 지금 만드는 주(줄)의 칸들 + 막대 배치
   let weekSum = 0; // 가계부 모드: 이번 달 날짜만 합산(주 오른쪽 끝에 표시)
   let weekByCat = {};        // 그 주 분류별 합계(색막대·클릭 상세용)
   let weekFirstKey = null;   // 그 주에 합산된 이번 달 첫/마지막 날짜(패널 제목용)
   let weekLastKey = null;
 
   // 6주(42칸) 고정 — 앞쪽은 지난달 꼬리, 뒤쪽은 다음달 머리로 채움
+  // (2026-10-13) 먼저 42칸의 날짜를 다 구해 두고 → 주(7칸)마다 기간 일정 막대 줄을 정한 뒤 → 칸을 만듦
+  const infos = [];
   for (let i = 0; i < 42; i++) {
     let cellY = y, cellM = m, cellD;
     let otherMonth = false;
@@ -790,7 +1062,22 @@ function renderGrid() {
     }
 
     const dow = (i + weekStart) % 7; // 실제 요일(색 표시용)
-    grid.appendChild(buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, MAX_CHIPS));
+    infos.push({ cellY, cellM, cellD, otherMonth, dow });
+  }
+
+  barRows = [];
+  for (let i = 0; i < 42; i++) {
+    const { cellY, cellM, cellD, otherMonth, dow } = infos[i];
+    const col = i % 7;
+    if (col === 0) {
+      const keys = infos.slice(i, i + 7).map((c) => dateKeyOf(c.cellY, c.cellM, c.cellD));
+      const lay = mode === 'calendar' ? layoutSpanWeek(keys, MAX_CHIPS) : null;
+      curRow = { cells: [], segs: lay ? lay.segs : [], perCol: lay ? lay.perCol : null };
+      barRows.push(curRow);
+    }
+    const cellEl = buildDayCell(cellY, cellM, cellD, otherMonth, dow, todayNum, MAX_CHIPS, curRow.perCol ? curRow.perCol[col] : null);
+    curRow.cells.push(cellEl);
+    grid.appendChild(cellEl);
 
     // 가계부 모드: 7칸(한 주)마다 오른쪽에 주간 합계 칸 추가(이번 달 날짜만 합산)
     if (mode === 'ledger') {
@@ -812,6 +1099,7 @@ function renderGrid() {
       }
     }
   }
+  drawBars(grid);
 }
 
 // 주간 합계 칸: 금액 + 분류별 비율 미니 색막대. 누르면 그 주 분류별 상세 패널
@@ -998,14 +1286,18 @@ function renderWeek() {
   const todayNum = ymd(today.y, today.m, today.d);
   const s = weekStartDate();
 
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(s.getFullYear(), s.getMonth(), s.getDate() + i);
-    const dow = d.getDay();
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(new Date(s.getFullYear(), s.getMonth(), s.getDate() + i));
+  const lay = layoutSpanWeek(days.map((d) => dateKeyOf(d.getFullYear(), d.getMonth(), d.getDate())), MAX_CHIPS_WEEK);
+  const row = { cells: [], segs: lay.segs, perCol: lay.perCol };
+  barRows = [row];
+  days.forEach((d, i) => {
     // 주간에서는 모든 칸이 "이번 주"라 otherMonth 없음(전부 클릭 가능)
-    grid.appendChild(
-      buildDayCell(d.getFullYear(), d.getMonth(), d.getDate(), false, dow, todayNum, MAX_CHIPS_WEEK)
-    );
-  }
+    const cellEl = buildDayCell(d.getFullYear(), d.getMonth(), d.getDate(), false, d.getDay(), todayNum, MAX_CHIPS_WEEK, lay.perCol[i]);
+    row.cells.push(cellEl);
+    grid.appendChild(cellEl);
+  });
+  drawBars(grid);
 }
 
 // ---- 일간 뷰 (그날 일정 목록) ----
@@ -1013,6 +1305,7 @@ function renderDay() {
   const grid = document.getElementById('cal-grid');
   grid.className = 'cal-grid day-mode';
   grid.innerHTML = '';
+  barRows = [];
 
   const dateKey = dateKeyOf(state.year, state.month, state.day);
   const view = document.createElement('div');
@@ -1194,9 +1487,9 @@ function formatDayTitle(dateKey) {
   return `${m}월 ${d}일 (${WEEKDAYS[dow]})`;
 }
 
-// 그날 항목들(일정 + 날짜 붙은 메모). loadEvents가 이미 시각순으로 정리해 둔 걸 그대로 씀
+// 그날 항목들(기간 일정 + 일정 + 날짜 붙은 메모). 기간 일정이 맨 위(종일이라), 나머지는 loadEvents가 정리한 시각순
 function memosOnDate(dateKey) {
-  return (eventsByDate[dateKey] || []).slice();
+  return spansOnDate(dateKey).concat(eventsByDate[dateKey] || []);
 }
 
 // 항목 열기: 일정 → 작은 일정 창, 메모 → 메모창
@@ -1300,7 +1593,12 @@ function buildMemoRow(it, afterEdit) {
   const tm = document.createElement('span');
   tm.className = 'cal-ov-item-time' + (it.time ? '' : ' is-empty');
   tm.textContent = it.time || '시각';
-  if (it.kind === 'gseries') {
+  if (it.endKey) {
+    // (2026-10-13) 기간 일정: 시각 대신 "10/3~10/5". 기간 일정은 종일이라 시각을 못 넣음(줄 클릭 = 일정 창)
+    tm.className = 'cal-ov-item-time cal-ov-item-range';
+    tm.textContent = `${shortDate(it.startKey)}~${shortDate(it.endKey)}`;
+    tm.title = '며칠짜리 일정이에요(눌러서 일정 창에서 고칠 수 있어요)';
+  } else if (it.kind === 'gseries') {
     // 보기 전용: 시각이 없으면 자리도 안 만듦, 눌러도 고치기 안 뜸(줄 클릭 = 보기 창)
     if (!it.time) tm.textContent = '';
     tm.title = '';
@@ -1509,13 +1807,47 @@ function openEventPanel(eventId) {
   timeIn.maxLength = 5;
   timeIn.title = '비워두면 시간 없는 일정이 됩니다. 9 / 930 / 9:30 아무렇게나 쳐도 됩니다';
   const noteIn = mkInput('text', 'cal-evform-note', '메모 한 줄(선택)', ev.note || '');
+  // (2026-10-13) 종료일 — 비우면 하루짜리. 넣으면 기간 일정(시각 없는 종일)이라 시각 칸은 잠김
+  const endIn = mkInput('date', 'cal-evform-date', '', eventEndKey(ev) || '');
+  const endClear = document.createElement('button');
+  endClear.className = 'cal-ledger-cancel cal-evform-endclear';
+  endClear.textContent = '하루짜리로';
+  endClear.title = '종료일을 지워서 하루짜리 일정으로 바꿔요';
+  let prevStart = origDate;
+  const syncEnd = () => {
+    endIn.min = dateIn.value || '';
+    const isRange = !!endIn.value && endIn.value > dateIn.value;
+    timeIn.disabled = isRange;
+    if (isRange) timeIn.value = '';
+    timeIn.placeholder = isRange ? '종일' : '예: 930';
+    endClear.style.visibility = endIn.value ? 'visible' : 'hidden';
+  };
+  // 시작 날짜를 옮기면 종료일도 같은 날 수만큼 같이 옮김(기간 길이 유지)
+  dateIn.addEventListener('change', () => {
+    if (endIn.value && /^\d{4}-\d{2}-\d{2}$/.test(prevStart) && /^\d{4}-\d{2}-\d{2}$/.test(dateIn.value)) {
+      const [y1, m1, d1] = prevStart.split('-').map(Number);
+      const [y2, m2, d2] = dateIn.value.split('-').map(Number);
+      const diff = Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+      endIn.value = addDaysKey(endIn.value, diff);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateIn.value)) prevStart = dateIn.value;
+    syncEnd();
+  });
+  endIn.addEventListener('change', () => { endIn.classList.remove('invalid'); syncEnd(); });
+  endClear.addEventListener('click', () => { endIn.value = ''; syncEnd(); });
 
   body.appendChild(mkLabel('제목'));
   body.appendChild(titleIn);
   body.appendChild(mkLabel('날짜 · 시각'));
   body.appendChild(mkRow(dateIn, timeIn));
+  body.appendChild(mkLabel('종료일 (며칠짜리 일정일 때만)'));
+  body.appendChild(mkRow(endIn, endClear));
   body.appendChild(mkLabel('메모'));
   body.appendChild(noteIn);
+  const colorPick = buildColorPicker(ev.colorId);
+  body.appendChild(mkLabel('색'));
+  body.appendChild(colorPick.el);
+  syncEnd();
 
   // 알람(메모창 알람칸과 같은 값 모양)
   const al = ev.alarm || {};
@@ -1612,16 +1944,20 @@ function openEventPanel(eventId) {
   async function save() {
     if (busy || locked) return;
     msg.textContent = '';
-    [titleIn, dateIn, timeIn].forEach((el) => el.classList.remove('invalid'));
+    [titleIn, dateIn, timeIn, endIn].forEach((el) => el.classList.remove('invalid'));
     if (!titleIn.value.trim()) { titleIn.classList.add('invalid'); msg.textContent = '제목을 적어주세요'; titleIn.focus(); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIn.value)) { dateIn.classList.add('invalid'); msg.textContent = '날짜를 골라주세요'; return; }
+    if (endIn.value && endIn.value < dateIn.value) { endIn.classList.add('invalid'); msg.textContent = '종료일이 시작 날짜보다 앞이에요'; return; }
+    const isRange = !!endIn.value && endIn.value > dateIn.value;
     let mlist = Object.keys(methodChks).filter((k) => methodChks[k].checked);
     if (onChk.checked && !mlist.length) mlist = ['notify']; // 방식을 다 끄면 울릴 방법이 없어서 알림은 남김
     const patch = {
       title: titleIn.value,
       note: noteIn.value,
       date: dateIn.value,
-      time: timeIn.value,
+      time: isRange ? '' : timeIn.value,
+      endDate: isRange ? endIn.value : null,
+      colorId: colorPick.get(),
       alarm: {
         enabled: onChk.checked,
         before: { days: clampNum(dIn, 3650), hours: clampNum(hIn, 23), minutes: clampNum(mIn, 59) },
@@ -1632,7 +1968,11 @@ function openEventPanel(eventId) {
     busy = true;
     try {
       const res = await window.api.updateEvent(ev.id, patch);
-      if (!res) { timeIn.classList.add('invalid'); msg.textContent = '시각을 알아볼 수 없어요 (예: 930, 14:00)'; return; }
+      if (!res) {
+        if (isRange) { endIn.classList.add('invalid'); msg.textContent = '날짜를 다시 확인해 주세요'; }
+        else { timeIn.classList.add('invalid'); msg.textContent = '시각을 알아볼 수 없어요 (예: 930, 14:00)'; }
+        return;
+      }
       await reloadData();
       openDayPanel(res.start.slice(0, 10));
     } finally {
@@ -1655,6 +1995,146 @@ function openEventPanel(eventId) {
   [titleIn, timeIn, noteIn].forEach((el) => {
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); backToDay(); return; }
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      save();
+    });
+    el.addEventListener('input', () => el.classList.remove('invalid'));
+  });
+
+  ov.appendChild(head);
+  ov.appendChild(body);
+  ov.appendChild(foot);
+  root.appendChild(ov);
+  titleIn.focus();
+}
+
+/* ---- 일정 색 고르기 동그라미 (2026-10-13, 태훈님 확정) ----
+   기본(금색) + 구글 캘린더 일정 색 11가지 = 12개(6개씩 두 줄). 고른 색은 구글과 서로 맞춰짐.
+   get() → 색 번호 "1"~"11", 기본이면 null */
+function buildColorPicker(selectedId) {
+  let cur = (selectedId && eventColorMap[selectedId]) ? String(selectedId) : '';
+  const wrap = document.createElement('div');
+  wrap.className = 'cal-colorpick';
+  const dots = [];
+  EVENT_COLOR_CHOICES.forEach(([id, name]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cal-colordot' + (id === '' ? ' is-default' : '');
+    b.style.setProperty('--dot', id ? eventColorOf(id) : EVENT_COLOR);
+    b.title = id ? name : '기본(금색)';
+    b.dataset.colorId = id;
+    b.addEventListener('click', () => {
+      cur = id;
+      dots.forEach((d) => d.classList.toggle('selected', d.dataset.colorId === cur));
+    });
+    dots.push(b);
+    wrap.appendChild(b);
+  });
+  dots.forEach((d) => d.classList.toggle('selected', d.dataset.colorId === cur));
+  return { el: wrap, get: () => cur || null };
+}
+
+/* ---- 기간 일정 추가 창 (2026-10-13, 태훈님 확정) ----
+   달력에서 날짜를 끌어서 놓으면 뜸. 시작·종료일이 채워져 있고 제목만 치면 됨.
+   - 기간 일정은 시각 없는 종일 일정(구글 캘린더 "종일 일정"과 같은 모양)
+   - 알람은 저장한 뒤 막대를 눌러 일정 창에서 넣음
+   - 엔터 저장 시 e.isComposing 확인(한글 조합 끝내는 엔터 무시) */
+function openRangeAddPanel(startKey, endKey) {
+  closeOverlays();
+  const root = document.getElementById('cal-root');
+  const ov = document.createElement('div');
+  ov.className = 'cal-overlay cal-evpanel';
+
+  const head = document.createElement('div');
+  head.className = 'cal-overlay-head';
+  const back = document.createElement('button');
+  back.className = 'cal-ov-btn';
+  back.textContent = '‹';
+  back.title = '달력으로';
+  back.addEventListener('click', closeOverlays);
+  const title = document.createElement('div');
+  title.className = 'cal-ov-title';
+  title.textContent = '기간 일정 추가';
+  const spacer = document.createElement('button');
+  spacer.className = 'cal-ov-btn';
+  spacer.style.visibility = 'hidden';
+  spacer.textContent = '‹';
+  head.appendChild(back);
+  head.appendChild(title);
+  head.appendChild(spacer);
+
+  const body = document.createElement('div');
+  body.className = 'cal-ov-list cal-evform';
+  const mk = (type, cls, ph, val) => {
+    const el = document.createElement('input');
+    el.type = type;
+    el.className = 'cal-ledger-input ' + cls;
+    if (ph) el.placeholder = ph;
+    el.value = val || '';
+    return el;
+  };
+  const lab = (t) => { const l = document.createElement('div'); l.className = 'cal-evform-label'; l.textContent = t; return l; };
+  const row = (...els) => { const r = document.createElement('div'); r.className = 'cal-ledger-formrow'; els.forEach((e) => r.appendChild(e)); return r; };
+
+  const titleIn = mk('text', 'cal-evform-title', '일정 제목', '');
+  const startIn = mk('date', 'cal-evform-date', '', startKey);
+  const endIn = mk('date', 'cal-evform-date', '', endKey);
+  endIn.min = startKey;
+  const tilde = document.createElement('span');
+  tilde.className = 'cal-evform-unit';
+  tilde.textContent = '~';
+  const noteIn = mk('text', 'cal-evform-note', '메모 한 줄(선택)', '');
+  const info = document.createElement('div');
+  info.className = 'cal-series-info';
+  info.textContent = '시각 없는 종일 일정으로 저장돼요. 알람은 저장한 뒤 막대를 눌러서 넣을 수 있어요.';
+  const msg = document.createElement('div');
+  msg.className = 'cal-evform-msg';
+
+  body.appendChild(lab('제목'));
+  body.appendChild(titleIn);
+  body.appendChild(lab('기간'));
+  body.appendChild(row(startIn, tilde, endIn));
+  body.appendChild(lab('메모'));
+  body.appendChild(noteIn);
+  const colorPick = buildColorPicker(null);
+  body.appendChild(lab('색'));
+  body.appendChild(colorPick.el);
+  body.appendChild(info);
+  body.appendChild(msg);
+  startIn.addEventListener('change', () => { endIn.min = startIn.value || ''; });
+
+  const foot = document.createElement('div');
+  foot.className = 'cal-ov-foot';
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'cal-newbtn cal-ledger-save';
+  saveBtn.textContent = '저장';
+  foot.appendChild(row(saveBtn));
+
+  let busy = false;
+  async function save() {
+    if (busy || locked) return;
+    msg.textContent = '';
+    [titleIn, startIn, endIn].forEach((el) => el.classList.remove('invalid'));
+    if (!titleIn.value.trim()) { titleIn.classList.add('invalid'); msg.textContent = '제목을 적어주세요'; titleIn.focus(); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startIn.value)) { startIn.classList.add('invalid'); msg.textContent = '시작 날짜를 골라주세요'; return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(endIn.value)) { endIn.classList.add('invalid'); msg.textContent = '종료일을 골라주세요'; return; }
+    if (endIn.value < startIn.value) { endIn.classList.add('invalid'); msg.textContent = '종료일이 시작 날짜보다 앞이에요'; return; }
+    if (!window.api || !window.api.createEvent) return;
+    busy = true;
+    try {
+      const res = await window.api.createEvent({ dateKey: startIn.value, endDate: endIn.value, title: titleIn.value, note: noteIn.value, colorId: colorPick.get() });
+      if (!res) { msg.textContent = '저장하지 못했어요 (메모 설정창이 열려 있으면 닫고 다시 해 주세요)'; return; }
+      await reloadData();
+      closeOverlays();
+    } finally {
+      busy = false;
+    }
+  }
+  saveBtn.addEventListener('click', save);
+  [titleIn, noteIn, startIn, endIn].forEach((el) => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeOverlays(); return; }
       if (e.key !== 'Enter' || e.isComposing) return;
       e.preventDefault();
       save();
@@ -2188,6 +2668,7 @@ async function init() {
   setLocked(true); // 잠금(배경) 상태로 시작
   goToday();      // 오늘로 시작(빈 그리드)
   wireControls();
+  wireRangeDrag(); // 날짜 끌어서 기간 일정 추가 + 막대 위치 다시 재기
   reloadData();   // 메모 일정 불러와 칸에 얹기
   reloadLedger().then(() => { if (mode === 'ledger') render(); }); // 가계부 데이터도 미리 읽어둠
   // 위트 멘트 문구 읽어둠(파일 수정은 앱 재시작 후 반영 — 실패해도 멘트만 안 뜰 뿐)

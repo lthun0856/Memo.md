@@ -27,3 +27,7 @@ client_secret_*.json
 # 수정 전 임시 백업 파일 / 디자인 시안(내부용)
 *.bak_*
 디자인시안/
+
+# 시험용·지울 예정 파일 (2026-10-14)
+icontest/
+_to_delete/

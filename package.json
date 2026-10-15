@@ -1,6 +1,6 @@
 {
   "name": "memo.md",
-  "version": "0.23.1",
+  "version": "0.24.0",
   "description": "바탕화면 메모장 - MD내보내기",
   "main": "main.js",
   "scripts": {
@@ -32,10 +32,23 @@
       "!인계서/**",
       "!CAL/**",
       "!screenshots/**",
-      "!test-data/**"
+      "!test-data/**",
+      "!icontest/**",
+      "!디자인시안/**",
+      "!node_modules/koffi/build/koffi/{darwin_*,freebsd_*,linux_*,musl_*,openbsd_*,win32_arm64,win32_ia32}/**",
+      "!node_modules/koffi/{src,vendor,doc,lib}/**",
+      "!node_modules/koffi/build/koffi/win32_x64/*.{exp,lib}",
+      "!_to_delete/**",
+      "!_mount_live_test.txt",
+      "!README.md"
+    ],
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/koffi/build/koffi/win32_x64/**"
     ]
   },
   "dependencies": {
+    "koffi": "2.16.3",
     "korean-lunar-calendar": "^0.4.0"
   }
 }

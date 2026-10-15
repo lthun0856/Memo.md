@@ -1,3 +1,4 @@
+const bootlog = require('./src/bootlog'); // (2026-10-13) 시작 속도 측정 — 맨 처음에 불러야 정확함
 const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, screen, clipboard, globalShortcut, nativeImage, Notification, shell, safeStorage, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -28,8 +29,12 @@ const {
   buildContentWithImages,
   planEventMigration,
 } = require('./src/migrate');
-const { createSync, flattenSeries, SyncError } = require('./src/gsync');
+const { createSync, flattenSeries, SyncError, eventEndKey, cleanColorId } = require('./src/gsync');
 const gauth = require('./src/gauth');
+// (2026-10-13) 바탕화면 정리 박스(박스 창·파일 이동·폴더 감시는 전부 이 파일 안에)
+const desktopBox = require('./src/box');
+// (2026-10-13) 자동 정리(2단계) — 새로 생긴 파일을 확장자 규칙대로 정리함으로
+const organizer = require('./src/organizer');
 const {
   exportMemoToObsidian,
   exportAsTxt,
@@ -345,6 +350,7 @@ function createWidgetWindow(initialPos) {
   });
 
   widgetWindow.loadFile(path.join(__dirname, 'renderer', 'widget', 'index.html'));
+  widgetWindow.webContents.once('did-finish-load', () => bootlog.mark('위젯 화면 그리기 끝(눈에 보이는 시점)'));
   widgetWindow.on('closed', () => (widgetWindow = null));
 
   // 세로 크기는 사용자가 마우스로 임의 조절 못하게 막음(가로만 허용) — 세로는 항상
@@ -522,7 +528,7 @@ function createCalendarWindow() {
   // setFocusable(false)라서 이후 클릭으로는 달력이 앞으로 안 나오고, 더블클릭해야 다시 활성화됨.
   calendarWindow.on('blur', () => {
     if (!calendarWindow || calendarWindow.isDestroyed()) return;
-    calendarWindow.setFocusable(false);
+    calendarWindow.setFocusable(false); calendarWindow.setSkipTaskbar(true);
     calendarWindow.webContents.send('calendar:activeChanged', false);
   });
 
@@ -1633,14 +1639,63 @@ function migrateCalendarMemosToEvents() {
 
 // ---------- 앱 시작 ----------
 
+// (2026-10-13) 바탕화면 정리 박스 — 통로(IPC) 등록. 창은 아래 whenReady 에서 엶
+desktopBox.init({
+  store,
+  iconPath: ICON_PATH,
+  preloadPath: path.join(__dirname, 'preload.js'),
+  rendererDir: path.join(__dirname, 'renderer'),
+  openSettings: () => createSettingsWindow(),
+  getSettingsWindow: () => settingsWindow,
+  getWidgetWindow: () => widgetWindow,
+  isPosVisible: (x, y, w, h) => isCalendarPosVisible(x, y, w, h)
+});
+organizer.init({ store, box: desktopBox, getSettingsWindow: () => settingsWindow });
+
+// (2026-10-13 시작속도) 박스 열기 + 자동 정리 시작 — 한 번만 실행
+let desktopBoxesStarted = false;
+function startDesktopBoxes() {
+  if (desktopBoxesStarted) return;
+  desktopBoxesStarted = true;
+  // 바탕화면에 깔리는 박스들 열기
+  try { desktopBox.openDesktopBoxes(); } catch (e) { console.error('박스 열기 실패', e); }
+  bootlog.mark('바탕화면 박스 창 만들기 끝');
+  // 자동 정리 감시 시작(설정에서 켜 둔 경우만)
+  try { organizer.start(); } catch (e) { console.error('자동 정리 시작 실패', e); }
+  bootlog.mark('자동 정리 시작 끝');
+}
+function scheduleDesktopBoxesStart() {
+  let delay = 1500;
+  try {
+    const b = { ...(store.DEFAULT_BOX || {}), ...(store.getSettings().box || {}) };
+    const n = Number(b.startDelayMs);
+    if (Number.isFinite(n)) delay = Math.min(Math.max(n, 0), 60000);
+  } catch (e) { /* 기본값 사용 */ }
+  const go = () => setTimeout(startDelayMsSafe, delay);
+  function startDelayMsSafe() { try { startDesktopBoxes(); } catch (e) { console.error('박스 시작 실패', e); } }
+  try {
+    if (widgetWindow && !widgetWindow.isDestroyed() && widgetWindow.webContents.isLoading()) {
+      widgetWindow.webContents.once('did-finish-load', go);
+    } else go();
+  } catch (e) { go(); }
+  // 혹시 위젯이 끝내 안 뜨더라도 박스는 열리게 — 15초 뒤 안전장치(이미 열렸으면 아무 일 안 함)
+  setTimeout(startDelayMsSafe, 15000 + delay);
+}
+
 app.whenReady().then(() => {
   // 이중 실행으로 판정돼 종료 중인 앱이 트레이/창을 만들지 않게 함(위 requestSingleInstanceLock 참고)
   if (!gotSingleInstanceLock) return;
+  bootlog.mark('앱 준비 완료(시작 작업 시작)');
+  // (2026-10-14) 버벅임 측정 — 1분마다 (앱 데이터 폴더)/perf-log.txt 에 기록
+  try { require('./src/perflog').start(require('electron'), app.getPath('userData'), 60 * 1000); } catch (e) { console.error('버벅임 측정 시작 실패', e); }
+  // 60초 뒤 측정 결과를 파일로 남김(그때까지 박스 아이콘 등 늦게 끝나는 것까지 담으려고)
+  setTimeout(() => bootlog.write(app.getPath('userData')), 60 * 1000);
   seedInitialDataIfNeeded();
   migrateChecklistIntoContent(); // 창을 만들기 전에 끝내야 함(메모창이 옛 데이터를 읽지 않게)
   migrateTablesIntoContent();    // 같은 이유로 여기서(체크리스트 다음에) 한 번에 끝냄
   migrateImagesIntoContent();    // 3단계. 표 다음에 붙어야 순서가 이미지 → 표 → 체크리스트 → 본문
   migrateCalendarMemosToEvents(); // 0.21.0: "달력" 주제 메모를 일정 파일로 1회 복사(원본 유지)
+  bootlog.mark('데이터 점검(옮기기) 끝');
 
   tray = new Tray(TRAY_ICON_PATH);
   tray.setToolTip('Memo.md - 클릭: 위젯 열기/앞으로, 더블클릭: 새 메모');
@@ -1682,6 +1737,7 @@ app.whenReady().then(() => {
     if (isMandatoryWelcome) createWelcomeWindow(true);
   }
   registerGlobalShortcuts();
+  bootlog.mark('트레이·위젯 창 만들기 끝');
 
   // 지난 실행 때 열어둔 채로 프로그램이 꺼졌던 메모창들을 그대로 되살림(× 버튼 등으로
   // 직접 닫은 건 대상에서 빠짐 — markMemoWindowOpen/reopenPreviouslyOpenMemos 참고)
@@ -1692,13 +1748,20 @@ app.whenReady().then(() => {
   if (settings.calendar && settings.calendar.wasOpen) {
     createCalendarWindow();
   }
+  bootlog.mark('메모창·달력 열기 시작');
+
+  // (2026-10-13 시작속도) 바탕화면 박스·자동 정리는 위젯이 화면에 뜬 뒤 box.startDelayMs 만큼 있다가 시작
+  // (예전엔 바로 열어서, 박스 아이콘 만드는 동안 위젯까지 27초 늦게 뜬 기록이 있음)
+  scheduleDesktopBoxesStart();
 
   // 휴지통 보관기한(60일) 지난 항목 정리 — 앱 켤 때 한 번만 확인
   cleanupExpiredTrash();
+  bootlog.mark('휴지통 정리 끝');
 
   // 자동 백업: 시작할 때 한 번 확인하고, 이후엔 프로그램이 켜져있는 동안 한 시간마다
   // "지금이 백업할 때인지" 다시 확인함(정확한 그 시각이 아니라 최대 1시간 오차 안에서 실행됨)
   maybeRunAutoBackup({ isLaunch: true });
+  bootlog.mark('자동 백업 확인 끝');
   setInterval(() => maybeRunAutoBackup({ isLaunch: false }), 60 * 60 * 1000);
 
   // 알람 검사: 앱이 켜져 있는 동안 20초마다 모든 메모의 일정 시각을 확인해 때가 되면 울림
@@ -1713,6 +1776,7 @@ app.whenReady().then(() => {
 
   // 구글 캘린더 동기화(0.22.0): 연결돼 있으면 켜고 조금 뒤 한 번, 그다음 설정한 분마다
   googleScheduleNext(20 * 1000);
+  bootlog.mark('시작 작업 전부 끝');
 });
 
 app.on('window-all-closed', (e) => {
@@ -1763,7 +1827,12 @@ ipcMain.handle('settings:save', (event, incoming) => {
     // 구글 동기화 설정은 전용 통로(google:setInterval)로만 바꿈 — 설정창 저장이 덮지 않게
     google: current.google,
     // (0.23.0) 설정창 위치·크기 기록도 설정창 폼에 없는 내부 값이라 항상 지금 값 유지
-    windowBounds: current.windowBounds
+    windowBounds: current.windowBounds,
+    // (2026-10-13) 박스 목록·박스 설정은 전용 통로(box:*)로만 바꿈 — 설정창 저장이 옛 값으로 덮지 않게
+    boxes: current.boxes,
+    box: current.box,
+    boxGroups: current.boxGroups,
+    organizer: current.organizer
   };
   const saved = store.saveSettings(merged);
   applyAutoLaunch(saved.autoLaunch);
@@ -2115,6 +2184,27 @@ function isRealDateKey(dateKey) {
   return d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3];
 }
 
+// ---- 기간 일정(종료일) (2026-10-13, 태훈님 확정) ----
+// endDate "YYYY-MM-DD" = 마지막 날(그날 포함), null = 하루짜리. 기간 일정은 시각 없는 종일(00:00)만.
+// 실제 종료일 계산은 src/gsync.js eventEndKey 하나만 씀(옛 일정은 구글 일수로 계산하는 규칙 포함)
+function shiftDateKey(dateKey, days) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const x = new Date(y, m - 1, d + days);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+function dateKeyDiff(a, b) { // b - a (일)
+  const [y1, m1, d1] = a.split('-').map(Number);
+  const [y2, m2, d2] = b.split('-').map(Number);
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+}
+// 받은 종료일 정리: 빈 값 → null / 이상한 날짜 → undefined(거절) / 시작일과 같음 → null(하루짜리) / 시작보다 앞 → undefined(거절)
+function cleanEndDate(raw, startKey) {
+  if (raw == null || String(raw).trim() === '') return null;
+  const v = String(raw).trim();
+  if (!isRealDateKey(v) || v < startKey) return undefined;
+  return v > startKey ? v : null;
+}
+
 // 알람 계산 함수(latestDueFire)는 메모 모양을 받으므로 일정을 메모 모양으로 잠깐 감싸서 넘김
 function eventAlarmShim(ev) {
   return { useCalendar: true, scheduleAt: ev.start, alarm: ev.alarm };
@@ -2145,11 +2235,15 @@ function isMemoCoveredByEvent(memo, cov) {
 
 // 달력에서 제목만 치고 엔터 → 일정 하나 만듦. 시각을 안 적으면 00:00(시각 없음).
 // (채널 이름은 0.20.0 그대로 두고 저장 위치만 메모 → 일정으로 바꿈)
-function createEvent({ dateKey, time, title, note } = {}) {
+// (2026-10-13) endDate 를 주면 기간 일정 — 이때는 시각을 무시하고 종일(00:00)로 만듦
+//              colorId = 구글 일정 색 번호 "1"~"11"(없으면 기본 금색)
+function createEvent({ dateKey, time, title, note, endDate, colorId } = {}) {
   const cleanTitle = String(title == null ? '' : title).trim();
   if (!cleanTitle) return null;
   if (!isRealDateKey(dateKey)) return null;
-  const rawTime = String(time == null ? '' : time).trim();
+  const end = cleanEndDate(endDate, dateKey);
+  if (end === undefined) return null;
+  const rawTime = end ? '' : String(time == null ? '' : time).trim();
   const hhmm = rawTime ? normalizeScheduleTime(rawTime) : '00:00';
   if (!hhmm) return null;
   const now = new Date().toISOString();
@@ -2158,6 +2252,8 @@ function createEvent({ dateKey, time, title, note } = {}) {
     title: cleanTitle.slice(0, 300),
     note: String(note == null ? '' : note).replace(/\s*\r?\n\s*/g, ' ').trim().slice(0, 500),
     start: `${dateKey}T${hhmm}`,
+    endDate: end,
+    colorId: cleanColorId(colorId),
     alarm: newEventAlarm(),
     sourceMemoId: null,
     google: null,
@@ -2214,6 +2310,23 @@ ipcMain.handle('events:update', (event, { id, patch } = {}) => {
     }
     next.start = `${dateKey}T${hhmm}`;
   }
+  // (2026-10-13) 종료일. patch 에 endDate 가 오면 그 값으로(빈 값 = 하루짜리),
+  // 안 오고 날짜만 옮기면 기간 길이를 그대로 유지한 채 같이 옮김
+  const curEnd = eventEndKey(ev);
+  const nextStartKey = next.start.slice(0, 10);
+  let wantEnd = curEnd; // 이 일정이 기간 일정이 돼야 하는지(마지막 날)
+  if ('endDate' in patch) {
+    const end = cleanEndDate(patch.endDate, nextStartKey);
+    if (end === undefined) return null;
+    next.endDate = end;
+    wantEnd = end;
+  } else if (curEnd && nextStartKey !== ev.start.slice(0, 10)) {
+    next.endDate = shiftDateKey(curEnd, dateKeyDiff(ev.start.slice(0, 10), nextStartKey));
+    wantEnd = next.endDate;
+  }
+  // 기간 일정은 시각 없는 종일만(시각을 넣으려면 종료일을 먼저 지워야 함)
+  if (wantEnd && next.start.slice(11, 16) !== '00:00') return null;
+  if ('colorId' in patch) next.colorId = cleanColorId(patch.colorId); // 이상한 값은 기본색(null)
   if ('alarm' in patch) next.alarm = normalizeAlarm(patch.alarm);
   // 시각이나 알람이 바뀌면 "이미 지나간 알람"이 곧바로 울리지 않게 재기준(메모와 같은 규칙)
   if ((next.start !== ev.start || 'alarm' in patch) && next.alarm && next.alarm.enabled) {
@@ -2234,6 +2347,7 @@ ipcMain.handle('events:setTime', (event, { id, time } = {}) => {
   const raw = String(time == null ? '' : time).trim();
   const hhmm = raw ? normalizeScheduleTime(raw) : '00:00';
   if (!hhmm) return null;
+  if (hhmm !== '00:00' && eventEndKey(ev)) return null; // 기간 일정엔 시각을 못 넣음(종일만)
   const nextStart = `${ev.start.slice(0, 10)}T${hhmm}`;
   if (nextStart === ev.start) return ev;
   ev.start = nextStart;
@@ -2387,7 +2501,7 @@ function runGoogleSync() {
         fetch: gFetch,
         getAccessToken: gGetAccessToken,
         store: { getEvents: () => store.getEvents(), saveEvents: (d) => store.saveEvents(d) },
-        state: { get: () => gState(), save: (s) => gSaveState({ syncToken: s.syncToken || null }) },
+        state: { get: () => gState(), save: (s) => gSaveState({ syncToken: s.syncToken || null, colorReady: !!s.colorReady }) },
         cfg,
         now: () => new Date(),
         newId: () => randomUUID(),
@@ -2750,7 +2864,7 @@ function openEventInCalendar(eventId) {
   if (!win || win.isDestroyed()) return;
   const send = () => {
     if (win.isDestroyed()) return;
-    win.setFocusable(true);
+    win.setFocusable(true); win.setSkipTaskbar(true); // (2026-10-13) 윈도우에선 setFocusable(true)가 작업표시줄 숨김을 풀어버려서 다시 걺
     win.focus();
     win.moveTop();
     win.webContents.send('calendar:activeChanged', true);
@@ -3692,7 +3806,7 @@ ipcMain.handle('window:openCalendarSettings', (event, tab) => { createCalendarSe
 ipcMain.handle('calendar:openProgressSettings', () => {
   const send = () => {
     if (!calendarWindow || calendarWindow.isDestroyed()) return;
-    calendarWindow.setFocusable(true);
+    calendarWindow.setFocusable(true); calendarWindow.setSkipTaskbar(true); // (2026-10-13) 윈도우에선 setFocusable(true)가 작업표시줄 숨김을 풀어버려서 다시 걺
     calendarWindow.show();
     calendarWindow.focus();
     calendarWindow.moveTop();
@@ -3712,7 +3826,7 @@ ipcMain.handle('window:openHelp', (event, page) => createHelpWindow(page));
 ipcMain.handle('calendar:setActive', (event, active) => {
   if (!calendarWindow || calendarWindow.isDestroyed()) return;
   if (active) {
-    calendarWindow.setFocusable(true);
+    calendarWindow.setFocusable(true); calendarWindow.setSkipTaskbar(true); // (2026-10-13) 윈도우에선 setFocusable(true)가 작업표시줄 숨김을 풀어버려서 다시 걺
     calendarWindow.focus();
     calendarWindow.moveTop();
     calendarWindow.webContents.send('calendar:activeChanged', true);

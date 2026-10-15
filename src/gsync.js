@@ -60,14 +60,16 @@ function fromGoogleTimes(g) {
   const e = g.end || {};
   if (s.date && /^\d{4}-\d{2}-\d{2}$/.test(s.date)) {
     const days = e.date ? Math.max(1, daysBetween(s.date, e.date)) : 1;
-    return { start: `${s.date}T00:00`, allDayDays: days, durationMin: null };
+    // endDate = 마지막 날(그날 포함). 구글 end.date 는 "다음 날"이라 하루 뺌. 하루짜리는 null
+    return { start: `${s.date}T00:00`, allDayDays: days, durationMin: null, endDate: days > 1 ? addDaysKey(s.date, days - 1) : null };
   }
   if (s.dateTime) {
     const sd = new Date(s.dateTime);
     if (isNaN(sd.getTime())) return null;
     const ed = e.dateTime ? new Date(e.dateTime) : null;
     const dur = ed && !isNaN(ed.getTime()) ? Math.max(1, Math.round((ed - sd) / 60000)) : null;
-    return { start: localKey(sd), allDayDays: null, durationMin: dur };
+    // 시각 있는 일정은 앱에서 하루짜리로만 다룸(기간 일정은 종일만 — 태훈님 확정 2026-10-13)
+    return { start: localKey(sd), allDayDays: null, durationMin: dur, endDate: null };
   }
   return null;
 }
@@ -86,6 +88,39 @@ function toGoogleTimes(start, meta, cfg, timeZone) {
   const out = { start: { dateTime: rfc3339Local(sd) }, end: { dateTime: rfc3339Local(ed) } };
   if (timeZone) { out.start.timeZone = timeZone; out.end.timeZone = timeZone; }
   return out;
+}
+
+// ---------- 일정 색 (2026-10-13, 태훈님 확정) ----------
+// 앱 일정의 colorId = 구글 일정 색 번호 "1"~"11" 그대로. 없음(null) = 기본색(앱 금색 / 구글 기본 달력색)
+function cleanColorId(v) {
+  const s = v == null ? '' : String(v);
+  return /^([1-9]|1[01])$/.test(s) ? s : null;
+}
+
+// ---------- 기간 일정(종료일) (2026-10-13, 태훈님 확정) ----------
+// 일정의 endDate("YYYY-MM-DD") = 마지막 날(그날 포함). 없거나 null = 하루짜리.
+// 기간 일정은 시각 없는 종일 일정만(start 가 00:00). 시각 있는 일정이면 종료일은 무시함.
+// 옛 일정(endDate 칸 자체가 없는 것)은 예전처럼 구글에서 받은 일수(google.allDayDays)로 계산
+// [주의] 이 규칙은 renderer/calendar/calendar.js 의 eventEndKey 와 똑같아야 함
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function eventEndKey(ev) {
+  if (!ev || typeof ev.start !== 'string' || ev.start.slice(11, 16) !== '00:00') return null;
+  const sk = ev.start.slice(0, 10);
+  let end = null;
+  if (Object.prototype.hasOwnProperty.call(ev, 'endDate')) end = ev.endDate;
+  else if (ev.google && ev.google.allDayDays > 1) end = addDaysKey(sk, ev.google.allDayDays - 1);
+  return (typeof end === 'string' && DATE_RE.test(end) && end > sk) ? end : null;
+}
+// 마지막으로 구글과 맞춘 값(meta.base)의 종료일. base 에 endDate 칸이 없으면(옛 기록) 일수로 계산
+function baseEndKey(meta) {
+  const base = (meta && meta.base) || {};
+  if (typeof base.start !== 'string') return null;
+  if (Object.prototype.hasOwnProperty.call(base, 'endDate')) return eventEndKey(base);
+  return eventEndKey({ start: base.start, google: meta });
+}
+// 시작~종료가 며칠인지(하루짜리 = 1)
+function spanDays(start, endKey) {
+  return endKey ? daysBetween(start.slice(0, 10), endKey) + 1 : 1;
 }
 
 // 구글 설명(HTML 섞일 수 있음) → 앱 "메모 한 줄"(줄바꿈 없이 500자)
@@ -133,7 +168,7 @@ function makeMeta(g, base, syncedUpdatedAt) {
     updated: g.updated || null,
     allDayDays: t.allDayDays || null,
     durationMin: t.durationMin || null,
-    base: { title: base.title, note: base.note, start: base.start },
+    base: { title: base.title, note: base.note, start: base.start, endDate: base.endDate || null, colorId: cleanColorId(base.colorId) },
     syncedUpdatedAt,
     remoteDeleted: false
   };
@@ -186,7 +221,8 @@ function createSync(ctx) {
   // ---- 1) 가져오기(구글 → 앱) ----
   async function fetchChanges() {
     const st = ctx.state.get() || {};
-    let syncToken = st.syncToken || null;
+    // (2026-10-13) 색 기능이 생긴 뒤 첫 동기화는 한 번 전체로 받음 → 예전에 맞춘 일정들의 구글 색을 가져옴
+    let syncToken = (st.syncToken && st.colorReady) ? st.syncToken : null;
     for (let round = 0; round < 2; round++) {
       const full = !syncToken;
       const items = [];
@@ -276,7 +312,7 @@ function createSync(ctx) {
       if (!isPlainEventType(g)) continue;
       const t = fromGoogleTimes(g);
       if (!t) continue;
-      const remote = { title: cleanTitle(g.summary), note: flattenNote(g.description), start: t.start };
+      const remote = { title: cleanTitle(g.summary), note: flattenNote(g.description), start: t.start, endDate: t.endDate || null, colorId: cleanColorId(g.colorId) };
 
       // 새 일정(폰 등에서 만든 것)
       if (!local) {
@@ -285,6 +321,8 @@ function createSync(ctx) {
           title: remote.title,
           note: remote.note,
           start: remote.start,
+          endDate: remote.endDate,
+          colorId: remote.colorId,
           alarm: ctx.newAlarm(),
           sourceMemoId: null,
           google: null,
@@ -302,7 +340,10 @@ function createSync(ctx) {
       }
 
       // 이미 있는 일정
-      if (local.google && local.google.id === g.id && local.google.etag && local.google.etag === g.etag) continue; // 안 바뀜(내가 보낸 것의 메아리 등)
+      // 안 바뀜(내가 보낸 것의 메아리 등). 단 색 기능 전에 맞춘 일정(기록에 colorId 칸 없음)은
+      // 구글 색을 한 번 받아오려고 건너뛰지 않음(앱에서 안 고친 일정이면 아래에서 구글 값 그대로 다시 맞춤)
+      const colorKnown = !!(local.google && local.google.base && Object.prototype.hasOwnProperty.call(local.google.base, 'colorId'));
+      if (colorKnown && local.google.id === g.id && local.google.etag && local.google.etag === g.etag) continue;
       const localTime = local.deletedAt ? ms(local.deletedAt) : ms(local.updatedAt);
       const localPending = local.deletedAt ? needsRemoteDelete(local) || !local.google : isDirty(local);
       if (localPending && localTime >= ms(g.updated)) {
@@ -320,6 +361,8 @@ function createSync(ctx) {
       local.title = remote.title;
       local.note = remote.note;
       local.start = remote.start;
+      local.endDate = remote.endDate;
+      local.colorId = remote.colorId;
       if (local.deletedAt) { local.deletedAt = null; result.restored++; }
       if (startChanged && local.alarm && local.alarm.enabled) ctx.rebaseAlarm(local);
       local.updatedAt = stamp;
@@ -333,9 +376,12 @@ function createSync(ctx) {
 
   // ---- 2) 보내기(앱 → 구글) ----
   function bodyFor(ev, meta) {
-    const times = toGoogleTimes(ev.start, meta, cfg, ctx.timeZone);
+    const times = toGoogleTimes(ev.start, { allDayDays: spanDays(ev.start, eventEndKey(ev)), durationMin: meta && meta.durationMin }, cfg, ctx.timeZone);
     if (!times) return null;
-    return { summary: ev.title, description: ev.note || '', ...times };
+    const body = { summary: ev.title, description: ev.note || '', ...times };
+    const cid = cleanColorId(ev.colorId);
+    if (cid) body.colorId = cid;
+    return body;
   }
   // 바뀐 칸만(구글에 있는 장소·참석자·긴 설명 등을 덮지 않게)
   function patchFor(ev, meta) {
@@ -343,8 +389,12 @@ function createSync(ctx) {
     const body = {};
     if (ev.title !== base.title) body.summary = ev.title;
     if (ev.note !== base.note) body.description = ev.note || '';
-    if (ev.start !== base.start) {
-      const times = toGoogleTimes(ev.start, ev.start.slice(11, 16) === '00:00' ? meta : { durationMin: meta && meta.durationMin }, cfg, ctx.timeZone);
+    // 색: null 을 보내면 구글이 기본색으로 되돌림(PATCH 에서 null = 지우기)
+    if (cleanColorId(ev.colorId) !== cleanColorId(base.colorId)) body.colorId = cleanColorId(ev.colorId);
+    const evEnd = eventEndKey(ev);
+    if (ev.start !== base.start || evEnd !== baseEndKey(meta)) {
+      const allDay = ev.start.slice(11, 16) === '00:00';
+      const times = toGoogleTimes(ev.start, allDay ? { allDayDays: spanDays(ev.start, evEnd) } : { durationMin: meta && meta.durationMin }, cfg, ctx.timeZone);
       if (!times) return null;
       // 종일 ↔ 시각 있는 일정으로 바뀔 때 남은 칸을 비워야 구글이 받아줌(PATCH 는 안 보낸 칸을 그대로 둠)
       if (times.start.date) {
@@ -378,7 +428,7 @@ function createSync(ctx) {
     if (!body) return;
     body.extendedProperties = { private: { memoAppId: ev.id } };
     const r = await api('POST', CAL + '/events', { body });
-    recordResult(ev.id, r.data, { title: ev.title, note: ev.note, start: ev.start, updatedAt: ev.updatedAt });
+    recordResult(ev.id, r.data, { title: ev.title, note: ev.note, start: ev.start, endDate: eventEndKey(ev), colorId: cleanColorId(ev.colorId), updatedAt: ev.updatedAt });
     result.pushed++;
   }
 
@@ -406,7 +456,7 @@ function createSync(ctx) {
       if (!g || !g.id || g.remoteDeleted) { await insertEvent(ev, result); continue; }
       const body = patchFor(ev, g);
       if (!body) continue;
-      const sent = { title: ev.title, note: ev.note, start: ev.start, updatedAt: ev.updatedAt };
+      const sent = { title: ev.title, note: ev.note, start: ev.start, endDate: eventEndKey(ev), colorId: cleanColorId(ev.colorId), updatedAt: ev.updatedAt };
       if (!Object.keys(body).length) {
         // 알람만 바꾼 경우 등 — 구글에 보낼 게 없음. 맞춘 걸로 표시만
         const d = ctx.store.getEvents();
@@ -468,6 +518,7 @@ function createSync(ctx) {
     const seriesIds = applyChanges(items, result);
     const st = ctx.state.get() || {};
     st.syncToken = nextSyncToken || null;
+    st.colorReady = true;
     ctx.state.save(st);
 
     await pushChanges(result);
@@ -500,7 +551,7 @@ function flattenSeries(googleSeries) {
 }
 
 module.exports = {
-  createSync, flattenSeries, SyncError,
+  createSync, flattenSeries, SyncError, eventEndKey, cleanColorId,
   // 검증용
-  _t: { fromGoogleTimes, toGoogleTimes, flattenNote, isDirty, needsRemoteDelete, rfc3339Local, addDaysKey }
+  _t: { fromGoogleTimes, toGoogleTimes, flattenNote, isDirty, needsRemoteDelete, rfc3339Local, addDaysKey, baseEndKey, spanDays }
 };

@@ -28,3 +28,33 @@
     nemo_data_done:
   ${endIf}
 !macroend
+
+; (2026-10-14) 이미 설치된 상태에서 다시 설치(새 버전으로 덮어쓰기)할 때는 바탕화면 바로가기를 새로 만들지 않음
+; - 처음 설치할 때만 만듦
+; - 다시 설치하는데 바탕화면에 바로가기가 이미 있었으면 그대로 둠(이름만 같으면 덮어써짐)
+; - 다시 설치하는데 바탕화면에 바로가기가 없었으면(지웠거나 정리함으로 옮김) 설치가 만든 걸 바로 지움
+; 제거 프로그램을 만들 때는 이 부분이 필요 없어서 빼 둠(안 쓰는 변수 경고 = 빌드 오류 방지)
+!ifndef BUILD_UNINSTALLER
+  Var memoWasInstalled
+  Var memoHadDesktopLink
+
+  !macro customInit
+    StrCpy $memoWasInstalled "0"
+    StrCpy $memoHadDesktopLink "0"
+    ReadRegStr $R9 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" InstallLocation
+    ${if} $R9 != ""
+      StrCpy $memoWasInstalled "1"
+    ${endIf}
+    ${if} ${FileExists} "$DESKTOP\${SHORTCUT_NAME}.lnk"
+      StrCpy $memoHadDesktopLink "1"
+    ${endIf}
+  !macroend
+
+  !macro customInstall
+    ${if} $memoWasInstalled == "1"
+    ${andIf} $memoHadDesktopLink == "0"
+      Delete "$newDesktopLink"
+      System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+    ${endIf}
+  !macroend
+!endif

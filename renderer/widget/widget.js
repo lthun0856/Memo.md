@@ -765,3 +765,12 @@ window.api.onSettingsUpdated(async () => {
 });
 
 loadAll();
+
+// (2026-10-13) 바탕화면 정리 — ▣ 버튼: "위젯에서 열기" 박스 목록(누르면 위젯 옆에 박스가 뜸)
+(function () {
+  const btn = document.getElementById('btnBox');
+  if (!btn) return;
+  btn.title = (LANG.widget && LANG.widget.boxTitle) || '';
+  if (!window.boxApi) { btn.hidden = true; return; }
+  btn.addEventListener('click', () => window.boxApi.showWidgetMenu());
+})();

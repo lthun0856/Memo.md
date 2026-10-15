@@ -409,3 +409,37 @@ body.md-disabled .md-feature-only { display: none; }
 /* 구글 캘린더(0.22.0) */
 .google-state { font-size: 12px; font-weight: 600; color: #29271F; }
 
+/* (2026-10-13) 바탕화면 정리 박스 */
+.box-new-ctrl input[type="text"] { width: 170px; }
+.box-list { display: flex; flex-direction: column; gap: 10px; }
+.box-card .box-name { flex: 1; min-width: 0; }
+.box-card .box-top { gap: 10px; }
+.box-card input[type="color"] { width: 30px; height: 26px; padding: 1px; border: 1px solid var(--field); border-radius: 4px; background: #fff; cursor: pointer; }
+.box-card .box-folder { word-break: break-all; }
+.box-card .box-missing { color: var(--danger); }
+.box-card .ctrl { flex-wrap: wrap; justify-content: flex-end; }
+
+/* (4차) 공통 스타일 / 자동 정리 */
+input[type="color"].box-color { width: 34px; height: 26px; padding: 1px; border: 1px solid var(--field); border-radius: 4px; background: #fff; cursor: pointer; }
+.org-folders { display: flex; flex-direction: column; gap: 4px; }
+.org-folder { display: flex; align-items: center; gap: 8px; font-size: 12px; word-break: break-all; }
+.org-folder span { flex: 1; min-width: 0; }
+.org-rule { padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.org-rule + .org-rule { border-top: 1px solid var(--line); }
+.org-rule-top { display: flex; align-items: center; gap: 8px; }
+.org-rule-top .org-name { width: 110px; }
+.org-rule-top select { flex: 1; min-width: 0; }
+.org-rule input.org-exts { width: 100%; font-size: 12px; }
+.org-rule.off { opacity: 0.55; }
+.org-actions { display: flex; gap: 6px; margin-top: 8px; }
+textarea.org-exclude { width: 100%; margin-top: 6px; resize: vertical; font: inherit; font-size: 12px; padding: 6px 8px; border: 1px solid var(--field); border-radius: 6px; box-sizing: border-box; }
+.org-log { display: flex; flex-direction: column; gap: 4px; }
+.org-log-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.org-log-item .info { flex: 1; min-width: 0; }
+.org-log-item .info div { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.org-log-item .info .sub { color: var(--sub); font-size: 11px; }
+/* (7차) 정리함/폴더 창 구분 표시, 자주 쓰는 폴더 버튼 */
+.box-card .box-kind { flex: none; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(43, 40, 32, 0.08); white-space: nowrap; }
+.box-card .box-kind.folder { background: rgba(60, 110, 200, 0.12); }
+.box-known { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.box-known button[disabled] { opacity: 0.55; cursor: default; }

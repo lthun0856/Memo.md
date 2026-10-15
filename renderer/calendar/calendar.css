@@ -958,3 +958,53 @@ html, body {
 .cal-evpanel .cal-ov-foot { display: flex; flex-direction: column; gap: 4px; }
 .cal-evpanel .cal-ledger-save { flex: 1 1 auto; }
 .cal-evform-del { align-self: center; }
+
+/* ---- 기간 일정 막대 + 날짜 끌어서 추가 (2026-10-13, 태훈님 확정) ----
+   막대는 그리드 위 투명 층에 겹쳐 그림(calendar.js positionBars). 칸 안의 .cal-lane 은 막대 자리만 비워 두는 빈 줄.
+   [주의] .cal-lane 높이와 .cal-bar 높이는 positionBars 가 빈 줄 크기를 재서 맞추므로 따로 맞출 필요 없음 */
+.cal-grid { position: relative; }
+.cal-lane { flex: 0 0 auto; height: 15px; }
+.cal-bar-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.cal-bar {
+  --bar-color: #C9A24B;
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 0 4px;
+  background: color-mix(in srgb, var(--bar-color) 30%, var(--cell));
+  border-radius: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+.cal-grid .cal-bar .cal-event-title { white-space: nowrap; word-break: normal; } /* 주간 뷰의 줄바꿈 규칙이 막대엔 안 먹게 */
+/* 진짜 시작/끝 날은 둥글게 + 시작 날만 진한 왼쪽 선. 주가 바뀌어 이어지는 쪽은 각지게 */
+.cal-bar.is-start { border-left: 3px solid var(--bar-color); border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
+.cal-bar.is-end { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+.cal-bar:hover { background: color-mix(in srgb, var(--bar-color) 45%, var(--cell)); }
+.cal-bar.is-past { opacity: 0.72; }
+.cal-root.locked .cal-bar { cursor: default; }
+.cal-root.locked .cal-bar:hover { background: color-mix(in srgb, var(--bar-color) 30%, var(--cell)); }
+/* 끄는 동안 고른 날짜 칸 */
+.cal-cell.drag-sel,
+.cal-cell.drag-sel:hover,
+.cal-cell.today.drag-sel { background: color-mix(in srgb, var(--today) 26%, var(--cell)); border-color: var(--today); }
+/* 그날 목록에서 기간 일정의 "10/3~10/5" 표시(시각 자리) */
+.cal-ov-item-range { opacity: 0.8; cursor: pointer; }
+.cal-evform-endclear { flex: 0 0 auto; font-size: 11px; }
+
+/* ---- 일정 색 고르기 (2026-10-13) — 기본 + 구글 11색, 6개씩 두 줄 ---- */
+.cal-colorpick { display: grid; grid-template-columns: repeat(6, 22px); gap: 6px 10px; padding: 2px 2px 4px; flex: 0 0 auto; }
+.cal-colordot {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid transparent; padding: 0; cursor: pointer;
+  background: var(--dot);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12) inset;
+}
+.cal-colordot:hover { transform: scale(1.1); }
+.cal-colordot.selected { border-color: var(--cell); box-shadow: 0 0 0 2px var(--ink); }
